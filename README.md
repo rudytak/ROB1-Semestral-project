@@ -3,6 +3,12 @@
 Assignment details: https://cw.fel.cvut.cz/wiki/courses/b3b33rob1/final_project
 Documentation: https://robotics-robot-stations.readthedocs.io/en/latest/index.html
 
+
+## TODO
+[X] Základní seznámení 15.10
+[] Kalibrace kamery pomocí různých pozic kroužku
+
+
 ## Structure of the repository
 
 - `code`: Directory for the assignment implementation.
