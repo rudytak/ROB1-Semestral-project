@@ -1,28 +1,60 @@
 import numpy as np
+from matplotlib import pyplot as plt
 import json
 import os
 import cv2 as cv
-from scipy.spatial.transform import Rotation
+from helper import euler_xyz_to_matrix, matrix_to_euler_xyz
 
 # TODO: possibly use extra hoop point outside just centers?
 # TODO: acquire K externally using a checkerboard or chAruUco? if hoop approach isn't good enough
 
 METADATA_PATH = 'calibration_data/metadata.json'
+CALIBRATION_PATH = 'calibration_data/camera_calib.json'
 
-def take_calibration_pictures(robot, divisions = (3,4,3), target_rotation_RPY = (0, -np.pi, 0), x_range = (0.4, 0.5), y_range = (-0.17, 0.17), z_range = (0.049, 0.15)):
-    target_rotation = Rotation.from_euler(
-        'xyz', target_rotation_RPY
-    ).as_matrix()
-    
+def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = (0, -np.pi, 0), x_range = (0.4, 0.525), y_range = (-0.17, 0.17), z_range = (0.049, 0.15)):
+
+    def select_good_rotation(x,y,z):
+        center = (
+            (x_range[-1] - x_range[0])/2 + x_range[0],
+            (y_range[-1] - y_range[0])/2 + y_range[0],
+            (z_range[-1] - z_range[0])/2 + z_range[0],
+        )
+
+        if target_rotation_RPY == 'auto':
+            if x >= center[0]:
+                return euler_xyz_to_matrix(
+                    (0, -np.pi, 0)
+                )
+            elif y < center[1]:
+                return euler_xyz_to_matrix(
+                    (0, -np.pi, -np.pi/2)
+                )
+            elif y >= center[1]:
+                return euler_xyz_to_matrix(
+                    (0, -np.pi, np.pi/2)
+                )
+            else:
+                return euler_xyz_to_matrix(
+                    (0, -np.pi, 0)
+                )
+        else:
+            return euler_xyz_to_matrix(
+                target_rotation_RPY
+            )
+
     data_points = []
-    
+    hoop_arm_length = .135
+
     i = 0
     for x in np.linspace(x_range[0], x_range[-1], divisions[0]):
         for y in np.linspace(y_range[0], y_range[-1], divisions[1]):
             for z in np.linspace(z_range[0], z_range[-1], divisions[2]):
                 i+=1
-                target_position = (x,y,z)
-                
+
+                # for orientation in viable_orientations:
+                target_rotation = select_good_rotation(x,y,z)
+                target_position = np.array([x,y,z]) - target_rotation @ np.array([-hoop_arm_length, 0, 0])
+
                 # Create homogeneous SE(3) transformation
                 target_pose = np.eye(4)
                 target_pose[:3, :3] = target_rotation # target rotation matrix
@@ -30,61 +62,63 @@ def take_calibration_pictures(robot, divisions = (3,4,3), target_rotation_RPY = 
 
                 # Move to the target position using IK
                 ik_sols = robot.ik(target_pose)
-                
+                # filter solution for reachability
+                ik_sols = list(filter(lambda q: robot.in_limits(q), ik_sols))
+
                 if len(ik_sols) > 0:
                     # Select the closest position
                     # q0 = robot.get_q()
                     q0 = robot.q_home
                     closest_solution = min(ik_sols, key=lambda q: np.linalg.norm(q - q0))
-                
+
                     robot.move_to_q(closest_solution)
                     robot.wait_for_motion_stop()
                 else:
                     print(f"WARN: position {x},{y},{z} is not reachable")
                     continue
-                
+
                 # Take the image
                 img = robot.grab_image()
-                
+
                 # Save the image
                 os.makedirs("calibration_data", exist_ok=True)
                 filepath = f"calibration_data/calibration_img_{i}.png"
                 cv.imwrite(filepath, img)
-                # Save metadata    
+                # Save metadata
                 final_pose = robot.fk(robot.get_q())
                 data_points.append({
                     "filepath": filepath,
-                    "RPY": Rotation.from_matrix(final_pose[:3, :3]).as_euler('xyz', degrees=False).tolist(),
+                    "RPY": matrix_to_euler_xyz(final_pose[:3, :3]).tolist(),
                     "translation_vector": final_pose[:3, 3].tolist()
                 })
-    
+
     # save the metadata json
     with open(METADATA_PATH, 'w') as f:
-        json.dump(data_points, f, ensure_ascii=False)
-    
+        json.dump(data_points, f, ensure_ascii=False, indent=4)
+
     return data_points
-    
+
 def load_calibration_data():
     if not os.path.isfile(METADATA_PATH):
         raise Exception("Calibration metadata missing! Run take_calibration_pictures() first")
-    
+
     metadata = None
     with open(METADATA_PATH) as f:
         metadata = json.load(f)
-    
+
     images = []
     for meta in metadata:
         img = cv.imread(meta["filepath"])
         images.append(img)
-    
+
     return metadata, images
 
 def detect_hoop_positions(images):
     # Detection super-parameters
     max_hue_dist = 40
-    min_circle_area = 300
-    minimal_roundness_deviation = 0.02 # 2%
-    
+    min_circle_area = 5000
+    minimal_roundness_deviation = 1 # 100% (is pretty much ignored becase cv.arcLength seems to be under-reporting)
+
     # Measured hoop color samples
     circle_color_samples = [
         (48, 84, 111),
@@ -96,39 +130,41 @@ def detect_hoop_positions(images):
     ]
     target_color_rgb = np.mean(circle_color_samples, axis=0).astype(np.uint8)
     target_color_hsv = cv.cvtColor(target_color_rgb.reshape(1, 1, 3), cv.COLOR_RGB2HSV).reshape(3,)
-        
+
     # print(f"Target color in HSV: {target_color}, max hue distance: {max_hue_dist}")
     lower_color_bound = np.array([target_color_hsv[0] - max_hue_dist, 50, 50])
     upper_color_bound = np.array([target_color_hsv[0] + max_hue_dist, 255, 255])
-    
+
     centers = []
     for img in images:
         hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
         mask = cv.inRange(hsv, lower_color_bound, upper_color_bound)
-        
+
         contours_all, hierarchy = cv.findContours(mask.astype(np.uint8), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-        
+
         contours = [c for c in contours_all if cv.contourArea(c) > min_circle_area]
         print(f"Found {len(contours_all)} contours in the image of which {len(contours)} are larger than {min_circle_area} pixels")
-        
+
         # find the most circular contour
-        f = lambda c: abs(4*np.pi*cv.contourArea(c) / (cv.arcLength(c, True)**2 + 1e-6) - 1)
-        passsing_contours = list(filter(lambda c: f(c) < minimal_roundness_deviation, contours))
-        if len(passsing_contours) == 0:
+        f = lambda c: abs(4*np.pi*cv.contourArea(c) / (cv.arcLength(c, True)**2 + 1e-8) - 1)
+        passing_contours = list(filter(lambda c: f(c) < minimal_roundness_deviation, contours))
+        print(list(map(f, contours)), list(map(cv.contourArea, contours)), list(map(lambda c: cv.arcLength(c,True), contours)))
+        if len(passing_contours) == 0:
             raise Exception("No sufficiently good circle has been found in the image!")
-        
-        best = min(passsing_contours, key=f)
-        
+
+        best = min(passing_contours, key=f)
+        center = np.mean(best.reshape(-1, 2), axis=0)
+
         # cv.drawContours(img, [best], -1, (255, 0, 0), 1)
         # plt.figure(figsize=(9, 6))
         # plt.imshow(img)
+        # plt.scatter([center[0]], [center[1]])
         # plt.tight_layout()
         # plt.show()
-        
-        center = np.mean(best.reshape(-1, 2), axis=0)
+
         centers.append(center)
     centers = np.array(centers).reshape(-1, 2)
-    
+
     return centers
 
 
@@ -283,7 +319,38 @@ def calibrate_camera():
         "reprojection_errors": errors
     }
 
+def save_camera_calibration():
+    res = calibrate_camera()
 
+    # save the metadata json
+    with open(CALIBRATION_PATH, 'w') as f:
+        json.dump({
+            "P": res['P'].tolist(),
+            "K": res['K'].tolist(),
+            "R_CB": res['R_CB'].tolist(),
+            "t_CB": res['t_CB'].tolist(),
+            "camera_position_base": res['camera_position_base'].tolist(),
+            "rms_error": res['rms_error'].tolist(),
+            "reprojection_errors": res['reprojection_errors'].tolist()
+        }, f, ensure_ascii=False, indent=4)
+
+def load_camera_calibration():
+    if not os.path.isfile(CALIBRATION_PATH):
+        raise Exception("Camera calibration data missing! Run take_calibration_pictures() and save_camera_calibration() first")
+
+    data = None
+    with open(CALIBRATION_PATH) as f:
+        data = json.load(f)
+
+    return {
+        "P": np.array(data['P']),
+        "K": np.array(data['K']),
+        "R_CB": np.array(data['R_CB']),
+        "t_CB": np.array(data['t_CB']),
+        "camera_position_base": np.array(data['camera_position_base']),
+        "rms_error": np.array(data['rms_error']),
+        "reprojection_errors": np.array(data['reprojection_errors'])
+    }
 
 
 
@@ -294,22 +361,22 @@ def detect_ArUco(img):
     # Initialize ArUco detector
     aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_50)
     detector = cv.aruco.ArucoDetector(aruco_dict)
-    
+
     corners, ids, rej = detector.detectMarkers(gray)
+    
     # imgc = img.copy()
     # cv.aruco.drawDetectedMarkers(imgc,corners,ids)
-
     # plt.figure(figsize=(10,5))
     # plt.imshow(imgc)
     # plt.show()
-    
+
     return corners, ids, rej
 
 
 def estimate_aruco_world_positions(
     img,
     calibration,
-    marker_size=0.03,
+    marker_size=0.04,
     dist_coeffs=None,
     dictionary_id=cv.aruco.DICT_4X4_50,
 ):
