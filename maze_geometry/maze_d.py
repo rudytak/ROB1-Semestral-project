@@ -35,6 +35,7 @@ def visualize() -> None:
     the hoop going through.
     """
     import matplotlib.pyplot as plt
+    from matplotlib.widgets import Slider
 
     # Sample positions along the rail.
     count = 500
@@ -62,7 +63,7 @@ def visualize() -> None:
     ax.scatter(*points[0], color="blue", label="Start")
     ax.scatter(0, 0, 0, color="black", label="Base origin")
 
-    # Fixed coordinate frame at the base; arrow lengths are 0.025 m.
+    # Fixed coordinate frame at the base
     length = 0.025
     axes = [
         ((length, 0, 0), "red", "X"),
@@ -78,10 +79,24 @@ def visualize() -> None:
         )
         ax.text(*direction, label, color=color)
 
+    # Moving point starts at the upper tip.
+    px, py, pz = position(0)
+    moving_point, = ax.plot(
+        [px], [py], [pz],
+        "o",
+        color="orange",
+        markersize=9,
+        label="Selected position",
+    )
+
+    coordinate_text = fig.text(
+        0.15, 0.13, "", family="monospace"
+    )
+
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
     ax.set_zlabel("Z [m]")
-    ax.set_title("Maze D — local coordinates")
+    ax.set_title("Maze D — move along the rail with the slider below")
 
     # Match box proportions to axis ranges: equal physical scale.
     ax.set_xlim(-0.04, 0.10)
@@ -91,6 +106,36 @@ def visualize() -> None:
 
     ax.view_init(elev=20, azim=-60)
     ax.legend()
+
+    slider_ax = fig.add_axes([0.15, 0.06, 0.65, 0.03])
+    slider = Slider(
+        slider_ax,
+        "s [m]",
+        0.0,
+        TOTAL_LENGTH,
+        valinit=0.0,
+        valfmt="%.5f",
+    )
+
+
+    def update(s):
+        px, py, pz = position(s)
+
+        moving_point.set_data_3d([px], [py], [pz])
+        coordinate_text.set_text(
+            f"x = {px:.5f} m   "
+            f"y = {py:.5f} m   "
+            f"z = {pz:.5f} m"
+        )
+
+        fig.canvas.draw_idle()
+
+    slider.on_changed(update)
+    update(0.0)
+
+
+
+    fig._maze_slider = slider
 
     plt.show()
 
