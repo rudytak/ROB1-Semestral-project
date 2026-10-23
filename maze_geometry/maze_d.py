@@ -51,22 +51,45 @@ def visualize() -> None:
 
     s_values.sort()
     points = [position(s) for s in s_values]
+    
+    x, y, z = zip(*points)
 
-    x = [p[0] for p in points]
-    z = [p[2] for p in points]
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
 
-    # Front view
-    fig, ax = plt.subplots()
-    ax.plot(x, z, color="black", linewidth=2, label="Rail centerline")
+    ax.plot(x, y, z, color="black", linewidth=2,
+            label="Rail centreline")
+    ax.scatter(*points[0], color="blue", label="Start")
+    ax.scatter(0, 0, 0, color="black", label="Base origin")
 
-    ax.scatter(0, 0, color="red", label="Base origin (0, 0, 0)")
-    ax.scatter(x[0], z[0], color="blue", label="Start")
+    # Fixed coordinate frame at the base; arrow lengths are 0.025 m.
+    length = 0.025
+    axes = [
+        ((length, 0, 0), "red", "X"),
+        ((0, length, 0), "green", "Y"),
+        ((0, 0, length), "blue", "Z"),
+    ]
+
+    for direction, color, label in axes:
+        ax.quiver(
+            0, 0, 0, *direction,
+            color=color,
+            arrow_length_ratio=0.2,
+        )
+        ax.text(*direction, label, color=color)
 
     ax.set_xlabel("X [m]")
-    ax.set_ylabel("Z [m]")
-    ax.set_title("Maze D — front view")
-    ax.set_aspect("equal", adjustable="box")
-    ax.grid(True)
+    ax.set_ylabel("Y [m]")
+    ax.set_zlabel("Z [m]")
+    ax.set_title("Maze D — local coordinates")
+
+    # Match box proportions to axis ranges: equal physical scale.
+    ax.set_xlim(-0.04, 0.10)
+    ax.set_ylim(-0.04, 0.04)
+    ax.set_zlim(-0.02, 0.18)
+    ax.set_box_aspect((0.14, 0.08, 0.20))
+
+    ax.view_init(elev=20, azim=-60)
     ax.legend()
 
     plt.show()
