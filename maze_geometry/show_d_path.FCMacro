@@ -1,0 +1,26 @@
+# Run in FreeCAD with D.step open in its original placement.
+import FreeCAD as App
+import Part
+import math
+
+doc = App.ActiveDocument
+if doc is None:
+    raise RuntimeError('Open D.step first.')
+V = App.Vector
+edges = [
+    Part.makeLine(V(85, 0, 155), V(35, 0, 155)),
+    Part.Arc(V(35, 0, 155), V(35-50/math.sqrt(2), 0, 105+50/math.sqrt(2)), V(-15, 0, 105)).toShape(),
+    Part.makeLine(V(-15, 0, 105), V(-15, 0, 45)),
+    Part.makeLine(V(-15, 0, 45), V(0, 0, 30)),
+    Part.makeLine(V(0, 0, 30), V(0, 0, 0)),
+]
+obj = doc.getObject('D_Centreline')
+if obj is None:
+    obj = doc.addObject('Part::Feature', 'D_Centreline')
+obj.Shape = Part.Wire(edges)
+obj.Label = 'D nominal centreline (mm)'
+obj.ViewObject.LineColor = (1.0, 0.15, 0.1)
+obj.ViewObject.LineWidth = 5.0
+doc.recompute()
+Gui.activeDocument().activeView().viewAxonometric()
+Gui.activeDocument().activeView().fitAll()
