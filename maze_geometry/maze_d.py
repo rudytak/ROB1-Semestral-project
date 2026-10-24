@@ -1,8 +1,12 @@
 import math
+import numpy as np
 
 SEGMENT_LENGTHS = (0.05, 0.025 * math.pi, 0.06, 0.015 * math.sqrt(2.0), 0.03)
 TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 
+################################################
+# MAZE GEOMETRY
+################################################
 
 def position(s: float) -> tuple[float, float, float]:
     """Return (x, y, z) at arc length s in [0, TOTAL_LENGTH], in m.
@@ -28,6 +32,54 @@ def position(s: float) -> tuple[float, float, float]:
     return (0.0, 0.0, 0.03 - s)
 
 
+def rail_direction(s: float) -> tuple[float, float, float]:
+    """Return the unit direction along the rail toward increasing s.
+    At sharp corners, use the outgoing segment's direction.
+    """
+    position(s)
+
+    bend_end = sum(SEGMENT_LENGTHS[:2])
+    corner_1 = sum(SEGMENT_LENGTHS[:3])
+    corner_2 = sum(SEGMENT_LENGTHS[:4])
+
+    if s < 0.05:
+        return (-1.0, 0.0, 0.0)
+
+    if s < bend_end:
+        angle = (s - 0.05) / 0.05
+        return (-math.cos(angle), 0.0, -math.sin(angle))
+
+    if s < corner_1:
+        return (0.0, 0.0, -1.0)
+
+    if s < corner_2:
+        q = 1.0 / math.sqrt(2.0)
+        return (q, 0.0, -q)
+
+    return (0.0, 0.0, -1.0)
+
+
+def hoop_pose(s: float) -> np.ndarray:
+    """Return the hoop's 4×4 pose in local maze coordinates.
+
+    Position is in metres.
+    Hoop +Z points opposite travel, so it moves along local -Z.
+    """
+    z_axis = -np.array(rail_direction(s), dtype=float)
+
+    # Fix the rotation around Z by choosing X along maze +Y.
+    y_axis = np.array([0.0, 1.0, 0.0])
+    x_axis = np.cross(y_axis, z_axis)
+
+    T = np.eye(4)
+    T[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
+    T[:3, 3] = position(s)
+
+    return T
+
+################################################
+# DEBUG LIBRARY
+################################################
 
 
 def visualize() -> None:
@@ -118,14 +170,54 @@ def visualize() -> None:
     )
 
 
-    def update(s):
-        px, py, pz = position(s)
+    hoop_arrows = []
+    hoop_labels = []
 
-        moving_point.set_data_3d([px], [py], [pz])
+    def update(s):
+        T = hoop_pose(s)
+
+        p = T[:3, 3]      # Hoop origin.
+        R = T[:3, :3]    # Columns are hoop X, Y, Z directions.
+
+        moving_point.set_data_3d([p[0]], [p[1]], [p[2]])
+
+        for arrow in hoop_arrows:
+            arrow.remove()
+        hoop_arrows.clear()
+
+        for label in hoop_labels:
+            label.remove()
+        hoop_labels.clear()
+
+        arrow_length = 0.025
+
+        for i, (color, name) in enumerate([
+            ("red", "Xh"),
+            ("green", "Yh"),
+            ("blue", "Zh"),
+        ]):
+            direction = R[:, i]
+
+            arrow = ax.quiver(
+                *p,
+                *direction,
+                length=arrow_length,
+                normalize=True,
+                color=color,
+                linewidth=2,
+                arrow_length_ratio=0.25,
+            )
+            hoop_arrows.append(arrow)
+
+            tip = p + arrow_length * direction
+            hoop_labels.append(
+                ax.text(*tip, name, color=color)
+            )
+
         coordinate_text.set_text(
-            f"x = {px:.5f} m   "
-            f"y = {py:.5f} m   "
-            f"z = {pz:.5f} m"
+            f"Position [m]: ({p[0]:.5f}, {p[1]:.5f}, {p[2]:.5f})\n"
+            f"Hoop +Z:      ({R[0, 2]:.3f}, "
+            f"{R[1, 2]:.3f}, {R[2, 2]:.3f})"
         )
 
         fig.canvas.draw_idle()
