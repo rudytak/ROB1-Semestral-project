@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 from camera import estimate_aruco_world_positions
+from helper import euler_xyz_to_matrix
 from maze_d import hoop_pose
 
 
@@ -182,8 +183,12 @@ class MazePredictor:
         T_radius[0, 3] = self.radius
 
         # Hoop pose in local maze coordinates
+        t_flange_hoop_offset = np.array([-0.135, 0.135, 0])
+
         T_maze_hoop = np.eye(4)
-        T_maze_hoop[2, 3] = 0.3  # 30 cm above maze base
+        T_maze_hoop[:3, :3] = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
+        T_maze_hoop[:3, 3] = t_flange_hoop_offset
+        T_maze_hoop[2, 3] += 0.3  # 30 cm above maze base
         # T_maze_hoop = hoop_pose(s)
 
         return T_base_center @ T_rot @ T_radius @ T_maze_hoop

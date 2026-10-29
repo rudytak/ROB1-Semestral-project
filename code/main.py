@@ -69,6 +69,8 @@ while s <= TOTAL_LENGTH:
     ik_sols = robot.ik(target_pose)
     ik_sols = list(filter(lambda q: robot.in_limits(q), ik_sols))
 
+    print(len(ik_sols))
+
     if len(ik_sols) > 0:
         q0 = robot.q_home
         closest_solution = min(ik_sols, key=lambda q: np.linalg.norm(q - q0))
