@@ -92,20 +92,24 @@ relative_times = sample_times - sample_times[-1]
 omega_scalar, phase_last = np.polyfit(relative_times, angles, 1)
 
 center = np.array([center_xy[0], center_xy[1], np.mean(cz)])
-height_offset = 0.1
+height_offset = 0.4
 
 start_t = time.time()
+
+progress = 1.0
 
 while True:
     # Time elapsed since the last observation.
     dt = time.time() - measurement_start_t - sample_times[-1]
-    theta = phase_last + omega_scalar * dt
+    theta = phase_last + omega_scalar * (dt + 0.08)
 
     p_BH_target = center + np.array([
         radius * np.cos(theta),
         radius * np.sin(theta),
-        height_offset,
+        max(0.1, height_offset * progress),
     ])
+
+    progress -= 0.01
 
     R_BF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
     p_FH = np.array([-0.135, 0.135, 0.0])
