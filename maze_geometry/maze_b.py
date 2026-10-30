@@ -1,60 +1,57 @@
 import math
 import numpy as np
 
-SEGMENT_LENGTHS = (0.05, 0.025 * math.pi, 0.06, 0.015 * math.sqrt(2.0), 0.03)
+SEGMENT_LENGTHS = (
+    0.050,                   # Upper vertical.
+    0.070 * math.sqrt(2.0),   # Diagonal.
+    0.080,                   # Lower vertical.
+)
 TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 
-################################################
-# MAZE GEOMETRY
-################################################
 
 def position(s: float) -> tuple[float, float, float]:
-    """Return (x, y, z) at arc length s in [0, TOTAL_LENGTH], in m.
+    """Return the centreline position in local maze coordinates, in metres.
 
-    Starts at the top tip (0.085, 0, 0.155) and ends at the plate (0, 0, 0).
+    Starts at (0.070, 0, 0.200) and ends at (0, 0, 0).
     """
     if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH:
-        raise ValueError(f's must be finite and between 0 and {TOTAL_LENGTH} m')
-    if s <= 0.05:
-        return (0.085 - s, 0.0, 0.155)
-    s -= 0.05
+        raise ValueError(
+            f"s must be finite and between 0 and {TOTAL_LENGTH} m"
+        )
+
+    # Upper vertical: travel downward.
+    if s <= SEGMENT_LENGTHS[0]:
+        return (0.070, 0.0, 0.200 - s)
+
+    s -= SEGMENT_LENGTHS[0]
+
+    # Diagonal: travel toward decreasing X and Z.
     if s <= SEGMENT_LENGTHS[1]:
-        a = s / 0.05
-        return (0.035 - 0.05 * math.sin(a), 0.0, 0.105 + 0.05 * math.cos(a))
-    s -= SEGMENT_LENGTHS[1]
-    if s <= 0.06:
-        return (-0.015, 0.0, 0.105 - s)
-    s -= 0.06
-    if s <= SEGMENT_LENGTHS[3]:
         d = s / math.sqrt(2.0)
-        return (-0.015 + d, 0.0, 0.045 - d)
-    s -= SEGMENT_LENGTHS[3]
-    return (0.0, 0.0, 0.03 - s)
+        return (0.070 - d, 0.0, 0.150 - d)
+
+    s -= SEGMENT_LENGTHS[1]
+
+    # Lower vertical: travel downward to the base.
+    return (0.0, 0.0, 0.080 - s)
 
 
 def rail_direction(s: float) -> tuple[float, float, float]:
-    """Return the unit direction along the rail toward increasing s.
+    """Return the unit direction toward increasing s.
+
     At sharp corners, use the outgoing segment's direction.
     """
-    position(s)
+    position(s)  # Validate s.
 
-    bend_end = sum(SEGMENT_LENGTHS[:2])
-    corner_1 = sum(SEGMENT_LENGTHS[:3])
-    corner_2 = sum(SEGMENT_LENGTHS[:4])
-
-    if s < 0.05:
-        return (-1.0, 0.0, 0.0)
-
-    if s < bend_end:
-        angle = (s - 0.05) / 0.05
-        return (-math.cos(angle), 0.0, -math.sin(angle))
+    corner_1 = SEGMENT_LENGTHS[0]
+    corner_2 = sum(SEGMENT_LENGTHS[:2])
 
     if s < corner_1:
         return (0.0, 0.0, -1.0)
 
     if s < corner_2:
         q = 1.0 / math.sqrt(2.0)
-        return (q, 0.0, -q)
+        return (-q, 0.0, -q)
 
     return (0.0, 0.0, -1.0)
 
@@ -62,12 +59,10 @@ def rail_direction(s: float) -> tuple[float, float, float]:
 def hoop_pose(s: float) -> np.ndarray:
     """Return the hoop's 4×4 pose in local maze coordinates.
 
-    Position is in metres.
-    Hoop +Z points opposite travel, so it moves along local -Z.
+    Hoop +Z points opposite travel.
+    Hoop +Y stays aligned with maze +Y.
     """
     z_axis = -np.array(rail_direction(s), dtype=float)
-
-    # Fix the rotation around Z by choosing X along maze +Y.
     y_axis = np.array([0.0, 1.0, 0.0])
     x_axis = np.cross(y_axis, z_axis)
 
