@@ -75,25 +75,25 @@ def rail_direction(s: float) -> tuple[float, float, float]:
     return (0.0, 0.0, -1.0)
 
 
-def hoop_pose(s: float) -> np.ndarray:
-    """Return the hoop's 4×4 pose in local maze coordinates.
+def hoop_pose(s: float, tilt: bool = False) -> np.ndarray:
+    """Return the hoop pose in local maze coordinates.
 
-    Hoop +Z points opposite travel.
-    Choose hoop +Y as close as possible to maze +Y,
-    while keeping all three axes perpendicular and unit length.
+    tilt=False: hoop axes stay parallel to the maze-base axes.
+    tilt=True: hoop +Z points opposite the rail direction.
     """
-    z_axis = -np.array(rail_direction(s), dtype=float)
-
-    y_reference = np.array([0.0, 1.0, 0.0])
-
-    x_axis = np.cross(y_reference, z_axis)
-    x_axis /= np.linalg.norm(x_axis)
-
-    y_axis = np.cross(z_axis, x_axis)
-
     T = np.eye(4)
-    T[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
     T[:3, 3] = position(s)
+
+    if tilt:
+        z_axis = -np.array(rail_direction(s), dtype=float)
+
+        y_reference = np.array([0.0, 1.0, 0.0])
+        x_axis = np.cross(y_reference, z_axis)
+        x_axis /= np.linalg.norm(x_axis)
+
+        y_axis = np.cross(z_axis, x_axis)
+
+        T[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
 
     return T
 
@@ -102,7 +102,7 @@ def hoop_pose(s: float) -> np.ndarray:
 ################################################
 
 
-def visualize() -> None:
+def visualize(tilt: bool = False) -> None:
     """Interactive plot for the parametrization of the maze with the relevant transfromations for
     the hoop going through.
     """
@@ -194,7 +194,7 @@ def visualize() -> None:
     hoop_labels = []
 
     def update(s):
-        T = hoop_pose(s)
+        T = hoop_pose(s, tilt=tilt)
 
         p = T[:3, 3]      # Hoop origin.
         R = T[:3, :3]    # Columns are hoop X, Y, Z directions.
@@ -259,4 +259,4 @@ def visualize() -> None:
 # DEBUG
 ################################################
 if __name__ == "__main__" :
-    visualize()
+    visualize(tilt=True)
