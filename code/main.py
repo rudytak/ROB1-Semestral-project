@@ -8,7 +8,7 @@ from ctu_crs import CRS97
 from camera import take_calibration_pictures, save_camera_calibration, load_camera_calibration, detect_ArUco, estimate_aruco_world_positions
 
 
-from maze_geometry import maze_b as maze
+from maze import maze_b as maze
 
 
 def maze_base_pose(p1, p2) -> np.ndarray:
