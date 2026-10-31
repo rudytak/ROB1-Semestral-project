@@ -119,7 +119,7 @@ def visualize() -> None:
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
     ax.set_zlabel("Z [m]")
-    ax.set_title("Maze D — move along the rail with the slider below")
+    ax.set_title("Maze A — move along the rail with the slider below")
 
     # Match box proportions to axis ranges: equal physical scale.
     ax.set_xlim(-0.04, 0.10)
