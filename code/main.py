@@ -11,6 +11,8 @@ from camera import take_calibration_pictures, save_camera_calibration, load_came
 from maze import maze_b as maze
 
 
+PREDICTION_LEAD = 0.08  # seconds
+
 def maze_base_pose(p1, p2) -> np.ndarray:
     """Maze-base pose from the two marker centres, in robot coordinates.
     marker id 1 upper-left, marker id 2
@@ -44,6 +46,8 @@ def main():
 
     robot = CRS97()
     robot.initialize(home=True)
+
+
     # robot.initialize(home=False)
 
     # # Taking calibration pictures
@@ -62,43 +66,15 @@ def main():
     print('t_CB = ', calib_results['t_CB'])
     print("-"*50)
 
-    # Perform ArUco detection
-    start_t = time.time()
-    ts,xs,ys,zs = [],[],[],[]
+    # Collect maze-base positions and orientations.
+    start_t = time.monotonic()
+    ts, phis = [], []
     cx, cy, cz = [], [], []
-    while time.time() - start_t < 15:
-        # detect_ArUco(robot.grab_image())
+
+    while time.monotonic() - start_t < 15:
         img = robot.grab_image()
+        frame_time = time.monotonic()
         res = estimate_aruco_world_positions(img, calib_results)
-        # res = list(filter(lambda r: r["id"] == 1, res))
-
-        # if len(res) > 0:
-        #     vec = (res[0]['T_BM'][:3,3])
-
-        #     ts.append(time.time() - start_t)
-        #     xs.append(vec[0])
-        #     ys.append(vec[1])
-        #     zs.append(vec[2])
-
-        #     print(f'Took img {len(ts)} at {ts[-1]}')
-
-        # if len(res) == 2:
-        #     det1 = list(filter(lambda r: r["id"] == 1, res))[0]
-        #     det2 = list(filter(lambda r: r["id"] == 2, res))[0]
-            
-        #     vec1 = (det1['T_BM'][:3,3])
-        #     vec2 = (det2['T_BM'][:3,3])
-
-        #     ts.append(time.time() - start_t)
-        #     xs.append(vec1[0])
-        #     ys.append(vec1[1])
-        #     zs.append(vec1[2])
-
-        #     cx.append((vec1[0] + vec2[0]) / 2)
-        #     cy.append((vec1[1] + vec2[1]) / 2)
-        #     cz.append((vec1[2] + vec2[2]) / 2)
-
-        #     print(f'Took img {len(ts)} at {ts[-1]}')
 
         detections = {d["id"]: d for d in res}
 
@@ -107,46 +83,95 @@ def main():
             vec2 = detections[2]["T_BM"][:3, 3]
 
             T_Bmaze_measured = maze_base_pose(vec1, vec2)
-            R_Bmaze_last = T_Bmaze_measured[:3, :3].copy()
 
-            ts.append(time.time() - start_t)
-            xs.append(vec1[0])
-            ys.append(vec1[1])
-            zs.append(vec1[2])
+            # Heading of the maze's +X axis in the robot's XY plane.
+            phi = np.arctan2(
+                T_Bmaze_measured[1, 0],
+                T_Bmaze_measured[0, 0],
+            )
 
             midpoint = T_Bmaze_measured[:3, 3]
+
+            ts.append(frame_time)
+            phis.append(phi)
             cx.append(midpoint[0])
             cy.append(midpoint[1])
             cz.append(midpoint[2])
 
-            print(f"Took img {len(ts)} at {ts[-1]}")
+            print(
+                f"Took img {len(ts)} "
+                f"at {frame_time - start_t:.3f} s"
+            )
 
-    if R_Bmaze_last is None or len(ts) < 3:
+    if len(ts) < 3:
         raise ValueError("Not enough observations of markers 1 and 2.")
 
-    measurement_start_t = start_t
 
-    xy = np.column_stack((cx, cy))
+    
     sample_times = np.asarray(ts)
+    xy = np.column_stack((cx, cy))
 
-    # Fit a circle to the tracked midpoint's XY positions.
-    origin = xy.mean(axis=0)
-    uv = xy - origin
+    # Remove jumps between +pi and -pi.
+    measured_phis = np.unwrap(np.asarray(phis))
 
-    A = np.column_stack((2 * uv, np.ones(len(uv))))
-    b = np.sum(uv**2, axis=1)
+    # Fit phi(t) = phi_last + omega * (t - last_time).
+    last_time = sample_times[-1]
+    relative_times = sample_times - last_time
 
-    solution, _, rank, _ = np.linalg.lstsq(A, b, rcond=None)
+    omega_scalar, phi_last = np.polyfit(
+        relative_times, measured_phis, 1
+    )
 
-    center_xy = origin + solution[:2]
-    offsets = xy - center_xy
-    radius = np.mean(np.linalg.norm(offsets, axis=1))
+    # Fit:
+    # maze_position_xy = table_center_xy + Rz(phi) @ offset_xy
+    #
+    # Unknowns: center_x, center_y, offset_x, offset_y.
+    c = np.cos(measured_phis)
+    sn = np.sin(measured_phis)
 
-    angles = np.unwrap(np.arctan2(offsets[:, 1], offsets[:, 0]))
-    relative_times = sample_times - sample_times[-1]
-    omega_scalar, phase_last = np.polyfit(relative_times, angles, 1)
+    A = np.zeros((2 * len(ts), 4))
 
-    center = np.array([center_xy[0], center_xy[1], np.mean(cz)])
+    # X equations.
+    A[0::2, 0] = 1.0
+    A[0::2, 2] = c
+    A[0::2, 3] = -sn
+
+    # Y equations.
+    A[1::2, 1] = 1.0
+    A[1::2, 2] = sn
+    A[1::2, 3] = c
+
+    solution, _, rank, singular_values = np.linalg.lstsq(
+        A, xy.reshape(-1), rcond=None
+    )
+
+    if (
+        rank < 4
+        or singular_values[-1] / singular_values[0] < 1e-3
+    ):
+        raise ValueError(
+            "Too little observed rotation to estimate the table centre."
+        )
+
+    # Rotation-axis position, using mean marker height.
+    center = np.array([
+        solution[0],
+        solution[1],
+        np.mean(cz),
+    ])
+
+    # Vector from rotation axis to maze origin,
+    # expressed along the maze's local axes.
+    offset_local = np.array([
+        solution[2],
+        solution[3],
+        0.0,
+    ])
+
+    print(f"Table centre [m]: {center}")
+    print(f"Angular speed [rad/s]: {omega_scalar:.5f}")
+    print(f"Last fitted angle [deg]: {np.degrees(phi_last):.2f}")
+    print(f"Axis-to-maze offset [m]: {offset_local}")
 
 
     s = 0.0
@@ -164,20 +189,13 @@ def main():
 
     try:
         while True:
-            dt = (time.time() - measurement_start_t - sample_times[-1])
+            dt = time.monotonic() - last_time
 
-            delta_phi = omega_scalar * (dt + 0.08)
-            theta = phase_last + delta_phi
+            phi = phi_last + omega_scalar * (dt + PREDICTION_LEAD)
 
-            # Predicted maze-base position.
-            p_Bmaze = center + np.array([
-                radius * np.cos(theta),
-                radius * np.sin(theta),
-                0.0])
-
-            # Predicted maze-base orientation.
-            R_delta = euler_xyz_to_matrix((0.0, 0.0, delta_phi))
-            R_Bmaze = R_delta @ R_Bmaze_last
+            # Predict orientation and position using the same angle.
+            R_Bmaze = euler_xyz_to_matrix((0.0, 0.0, phi))
+            p_Bmaze = center + R_Bmaze @ offset_local
 
             T_Bmaze = np.eye(4)
             T_Bmaze[:3, :3] = R_Bmaze
@@ -233,57 +251,3 @@ if __name__ == "__main__":
 
 
 # EOF
-
-
-
-# height_offset = 0.4
-
-# start_t = time.time()
-
-# progress = 1.0  
-
-# while True:
-#     # Time elapsed since the last observation.
-#     dt = time.time() - measurement_start_t - sample_times[-1]
-#     theta = phase_last + omega_scalar * (dt + 0.08)
-
-#     p_BH_target = center + np.array([
-#         radius * np.cos(theta),
-#         radius * np.sin(theta),
-#         max(0.1, height_offset * progress),
-#     ])
-
-#     progress -= 0.01
-
-#     R_BF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
-#     p_FH = np.array([-0.135, 0.135, 0.0])
-
-#     T_BF_target = np.eye(4)
-#     T_BF_target[:3, :3] = R_BF
-#     T_BF_target[:3, 3] = p_BH_target - R_BF @ p_FH
-
-#     ik_sols = robot.ik(T_BF_target)
-#     # filter solution for reachability
-#     ik_sols = list(filter(lambda q: robot.in_limits(q), ik_sols))
-    
-#     print(len(ik_sols))
-#     if len(ik_sols) > 0:
-#         # Select the closest position
-#         # q0 = robot.get_q()
-#         q0 = robot.q_home
-#         closest_solution = min(ik_sols, key=lambda q: np.linalg.norm(q - q0))
-
-#         robot.move_to_q(closest_solution)
-#         robot.wait_for_motion_stop()
-#         # time.sleep(.1)
-
-# robot.close()
-
-# plt.figure()
-# # plt.scatter(ts, cx, c="r", label="X")
-# # plt.scatter(ts, cy, c="g", label="Y")
-# # plt.scatter(ts, cz, c="b", label="Z")
-# plt.scatter(ts, angle, c="orange", label="deg/s")
-# plt.scatter(ts[1:], omega, c="blue", label="rad/s")
-# plt.legend()
-# plt.show()
