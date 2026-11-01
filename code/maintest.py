@@ -168,4 +168,143 @@ def main():
         last_time = sample_times[-1]
         relative_times = sample_times - last_time
 
-        # Heading
+        # Heading model:
+        # phi(t) = phi_last + omega_scalar * (t - last_time).
+        omega_scalar, phi_last = np.polyfit(
+            relative_times, measured_phis, 1
+        )
+
+        # Position model:
+        # maze_xy = table_center_xy + Rz(phi) @ offset_xy.
+        c = np.cos(measured_phis)
+        sn = np.sin(measured_phis)
+
+        A = np.zeros((2 * len(ts), 4))
+
+        A[0::2, 0] = 1.0
+        A[0::2, 2] = c
+        A[0::2, 3] = -sn
+
+        A[1::2, 1] = 1.0
+        A[1::2, 2] = sn
+        A[1::2, 3] = c
+
+        solution, _, rank, singular_values = np.linalg.lstsq(
+            A, xy.reshape(-1), rcond=None
+        )
+
+        if (
+            rank < 4
+            or singular_values[-1] / singular_values[0] < 1e-3
+        ):
+            raise ValueError(
+                "Too little observed rotation to estimate the table centre."
+            )
+
+        center = np.array([
+            solution[0],
+            solution[1],
+            np.mean(cz),
+        ])
+
+        offset_local = np.array([
+            solution[2],
+            solution[3],
+            0.0,
+        ])
+
+        print(f"\nTable centre [m]: {center}")
+        print(f"Angular speed [rad/s]: {omega_scalar:.5f}")
+        print(f"Axis-to-maze offset [m]: {offset_local}")
+        print(f"Turnaround distance s [m]: {s_turn:.4f}")
+
+        move_start = time.monotonic()
+
+        while True:
+            dt = time.monotonic() - last_time
+
+            phi = (
+                phi_last
+                + omega_scalar * (dt + PREDICTION_LEAD)
+            )
+
+            # Predict the maze pose.
+            R_Bmaze = euler_xyz_to_matrix(
+                (0.0, 0.0, phi)
+            )
+            p_Bmaze = center + R_Bmaze @ offset_local
+
+            # Maze D supplies the desired local hoop pose.
+            T_maze_H = maze.hoop_pose(s, tilt=tilt)
+
+            p_maze_H = T_maze_H[:3, 3]
+            R_maze_H = T_maze_H[:3, :3]
+
+            # Desired hoop centre in robot-base coordinates.
+            p_BH_target = p_Bmaze + R_Bmaze @ p_maze_H
+
+            # Table rotation + maze orientation + chosen hoop spin.
+            R_BH_target = R_Bmaze @ R_maze_H @ R_spin
+
+            # Convert the hoop orientation to flange orientation.
+            R_BF = R_BH_target @ R_HF
+
+            # Construct the complete flange target.
+            T_BF_target = np.eye(4)
+            T_BF_target[:3, :3] = R_BF
+            T_BF_target[:3, 3] = (
+                p_BH_target - R_BF @ p_FH
+            )
+
+            print_target_pose(
+                T_BF_target,
+                s,
+                phi,
+                returning=s_step < 0,
+            )
+
+            ik_sols = [
+                q
+                for q in robot.ik(T_BF_target)
+                if robot.in_limits(q)
+            ]
+
+            print(f"Valid IK solutions: {len(ik_sols)}")
+
+            if not ik_sols:
+                print("No valid IK solution. Ending the run.")
+                break
+
+            # Prefer the solution closest to the current joint position.
+            q_current = np.asarray(robot.get_q())
+
+            closest_solution = min(
+                ik_sols,
+                key=lambda q: np.linalg.norm(q - q_current),
+            )
+
+            robot.move_to_q(closest_solution)
+            robot.wait_for_motion_stop()
+
+            # Track the approach point before advancing along the path.
+            if time.monotonic() - move_start < START_DELAY:
+                continue
+
+            # Reverse only after reaching the turnaround target.
+            if s_step > 0 and s >= s_turn:
+                s_step = -PATH_STEP
+                print("Turnaround reached. Returning.")
+
+            # Finish only after reaching the starting target again.
+            elif s_step < 0 and s <= 0.0:
+                print("Returned to the starting point.")
+                break
+
+            s = min(s_turn, max(0.0, s + s_step))
+
+    finally:
+        robot.close()
+
+
+if __name__ == "__main__":
+    main()
