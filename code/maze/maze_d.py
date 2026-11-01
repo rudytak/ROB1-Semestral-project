@@ -94,21 +94,30 @@ def rail_direction(s: float) -> tuple[float, float, float]:
 
 
 def hoop_pose(s: float, tilt: bool = True) -> np.ndarray:
-    """Return the hoop's 4×4 pose in local maze coordinates.
+    """Return the hoop pose in maze coordinates.
 
-    Position is in metres.
-    Hoop +Z points opposite travel, so it moves along local -Z.
-    As in the supplied version, tilt is accepted but not used.
+    tilt=True:
+        Follow the upper straight and curved section.
+        Remain upright after the curve, including the lower diagonal.
+
+    tilt=False:
+        Remain upright everywhere.
     """
-    z_axis = -np.array(rail_direction(s), dtype=float)
-
-    # Keep hoop Y aligned with maze +Y.
-    y_axis = np.array([0.0, 1.0, 0.0])
-    x_axis = np.cross(y_axis, z_axis)
-
     T = np.eye(4)
-    T[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
     T[:3, 3] = position(s)
+
+    bend_end = sum(SEGMENT_LENGTHS[:2])
+
+    if tilt and s < bend_end:
+        z_axis = -np.asarray(rail_direction(s), dtype=float)
+
+        y_axis = np.array([0.0, 1.0, 0.0])
+        x_axis = np.cross(y_axis, z_axis)
+        x_axis /= np.linalg.norm(x_axis)
+
+        T[:3, :3] = np.column_stack(
+            (x_axis, y_axis, z_axis)
+        )
 
     return T
 

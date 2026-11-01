@@ -1,6 +1,3 @@
-################################################
-# MAZE GEOMETRY
-################################################
 import math
 import numpy as np
 
@@ -8,6 +5,12 @@ import numpy as np
 SEGMENT_LENGTHS = (0.250,)
 TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 
+################################################
+# MAZE GEOMETRY
+################################################
+
+def get_len() -> float:
+    return TOTAL_LENGTH
 
 def position(s: float) -> tuple[float, float, float]:
     """Return the hoop centre in local maze coordinates, in metres.

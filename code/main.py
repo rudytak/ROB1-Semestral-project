@@ -173,9 +173,9 @@ def main():
 
     s_max = maze.get_len()
     s = 0
-    s_step_const = 0.0001
+    s_step_const = 0.003
     s_step = s_step_const
-    s_turn = s_max - 0.1
+    s_turn = s_max - 0.05 # when to turn around and go back to the start
     tilt = False
 
 
@@ -199,10 +199,7 @@ def main():
 
         # Predict orientation and position using the same angle.
         R_Bmaze = euler_xyz_to_matrix((0.0, 0.0, phi))
-        if time.time() - move_start < 15:
-            p_Bmaze = center + R_Bmaze @ offset_local + np.array([0,0,0.02])
-        else :
-            p_Bmaze = center + R_Bmaze @ offset_local + np.array([0,0,0.00])
+        p_Bmaze = center + R_Bmaze @ offset_local + np.array([0,0,0.00])
 
         # Get the hoop position and orientation in maze coordinates.
         T_maze_H = maze.hoop_pose(s, tilt=tilt)
@@ -260,7 +257,7 @@ def main():
             robot.move_to_q(closest_solution)
             robot.wait_for_motion_stop()
 
-            if time.time() - move_start > 15:
+            if time.time() - move_start > 8:
 
                 # The turnaround target has just been reached.
                 if s_step > 0 and s >= s_turn:

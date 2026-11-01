@@ -13,7 +13,8 @@ TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 ################################################
 # MAZE GEOMETRY
 ################################################
-
+def get_len() -> float:
+    return TOTAL_LENGTH
 
 def position(s: float) -> tuple[float, float, float]:
     """Return the centreline position in local maze coordinates, in metres.
