@@ -11,7 +11,7 @@ from camera import take_calibration_pictures, save_camera_calibration, load_came
 from maze import maze_b as maze
 
 
-PREDICTION_LEAD = 0.08  # seconds
+PREDICTION_LEAD = 0.8  # seconds
 
 def maze_base_pose(p1, p2) -> np.ndarray:
     """Maze-base pose from the two marker centres, in robot coordinates.
@@ -168,64 +168,114 @@ def main():
         0.0,
     ])
 
-    print(f"Table centre [m]: {center}")
-    print(f"Angular speed [rad/s]: {omega_scalar:.5f}")
-    print(f"Last fitted angle [deg]: {np.degrees(phi_last):.2f}")
-    print(f"Axis-to-maze offset [m]: {offset_local}")
 
 
-    s = 0.0
+
+    s_max = maze.get_len()
+    s = 0
+    s_step_const = 0.0001
+    s_step = s_step_const
+    s_turn = s_max - 0.1
     tilt = False
+
+
 
     # Current tool offset.
     p_FH = np.array([-0.135, 0.135, 0.0])
+    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
 
-    R_HF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
+    # R_HF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
 
-    T_FH = np.eye(4)
-    T_FH[:3, :3] = R_HF.T
-    T_FH[:3, 3] = p_FH
-    T_HF = np.linalg.inv(T_FH)
+    # T_FH = np.eye(4)
+    # # T_FH[:3, :3] = R_HF.T
+    # T_FH[:3, 3] = p_FH
+    # T_HF = np.linalg.inv(T_FH)
 
-    try:
-        while True:
-            dt = time.monotonic() - last_time
+    move_start = time.time()
+    while True:
+        dt = time.monotonic() - last_time
 
-            phi = phi_last + omega_scalar * (dt + PREDICTION_LEAD)
+        phi = phi_last + omega_scalar * (dt + PREDICTION_LEAD)
 
-            # Predict orientation and position using the same angle.
-            R_Bmaze = euler_xyz_to_matrix((0.0, 0.0, phi))
-            p_Bmaze = center + R_Bmaze @ offset_local
+        # Predict orientation and position using the same angle.
+        R_Bmaze = euler_xyz_to_matrix((0.0, 0.0, phi))
+        if time.time() - move_start < 15:
+            p_Bmaze = center + R_Bmaze @ offset_local + np.array([0,0,0.02])
+        else :
+            p_Bmaze = center + R_Bmaze @ offset_local + np.array([0,0,0.00])
 
-            T_Bmaze = np.eye(4)
-            T_Bmaze[:3, :3] = R_Bmaze
-            T_Bmaze[:3, 3] = p_Bmaze
+        # Get the hoop position and orientation in maze coordinates.
+        T_maze_H = maze.hoop_pose(s, tilt=tilt)
 
-            # Local maze target -> robot-base hoop target -> flange target.
-            T_maze_H = maze.hoop_pose(s, tilt=tilt)
-            T_BH_target = T_Bmaze @ T_maze_H
-            T_BF_target = T_BH_target @ T_HF
+        p_maze_H = T_maze_H[:3, 3]
+        R_tilt_maze = T_maze_H[:3, :3]
 
-            ik_sols = robot.ik(T_BF_target)
-            ik_sols = [
-                q for q in ik_sols
-                if robot.in_limits(q)
-            ]
+        # Transform the hoop centre into robot-base coordinates.
+        p_BH_target = p_Bmaze + R_Bmaze @ p_maze_H
 
-            print(len(ik_sols))
+        # Express the local tilt in robot-base coordinates.
+        R_tilt_B = R_Bmaze @ R_tilt_maze @ R_Bmaze.T
 
-            if len(ik_sols) > 0:
-                q0 = robot.q_home
-                closest_solution = min(
-                    ik_sols,
-                    key=lambda q: np.linalg.norm(q - q0),
-                )
+        # Apply that tilt to your known working orientation.
+        R_BF = R_tilt_B @ R_BF_neutral
 
-                robot.move_to_q(closest_solution)
-                robot.wait_for_motion_stop()
+        # Construct the complete 4×4 flange target.
+        T_BF_target = np.eye(4)
+        T_BF_target[:3, :3] = R_BF
+        T_BF_target[:3, 3] = p_BH_target - R_BF @ p_FH
 
-    finally:
-        robot.close()
+        # T_Bmaze = np.eye(4)
+        # T_Bmaze[:3, :3] = R_Bmaze
+        # T_Bmaze[:3, 3] = p_Bmaze
+
+        # # Local maze target -> robot-base hoop target -> flange target.
+        # R_BF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
+
+        # p_maze_H = np.asarray(maze.position(s))
+        # p_BH_target = p_Bmaze - R_BF @ p_FH
+
+        # T_BF_target = np.eye(4)
+        # T_BF_target = R_BF
+        # T_BF_target = p_BH_target - R_BF @ p_FH
+
+        # # T_maze_H = maze.hoop_pose(s, tilt=tilt)
+        # # T_BH_target = T_Bmaze @ T_maze_H
+        # # T_BF_target = T_BH_target @ T_HF
+
+        ik_sols = robot.ik(T_BF_target)
+        ik_sols = [
+            q for q in ik_sols
+            if robot.in_limits(q)
+        ]
+
+        print(len(ik_sols))
+
+        if len(ik_sols) > 0:
+            q0 = robot.q_home
+            closest_solution = min(
+                ik_sols,
+                key=lambda q: np.linalg.norm(q - q0),
+            )
+
+            robot.move_to_q(closest_solution)
+            robot.wait_for_motion_stop()
+
+            if time.time() - move_start > 15:
+
+                # The turnaround target has just been reached.
+                if s_step > 0 and s >= s_turn:
+                    s_step = -s_step_const
+
+                # The return to the starting point has completed.
+                elif s_step < 0 and s <= 0.0:
+                    print("Returned to the starting point.")
+                    break
+
+                # Select the next target without crossing either end.
+                s = min(s_turn, max(0.0, s + s_step))
+
+
+    robot.close()
 
 
 

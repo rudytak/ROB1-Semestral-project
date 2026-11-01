@@ -2,7 +2,7 @@ import math
 import numpy as np
 
 SEGMENT_LENGTHS = (
-    0.050,                   # Upper vertical.
+    0.100,                   # 5 cm approach + 5 cm upper vertical.
     0.050 * math.sqrt(2.0),   # Diagonal in YZ.
     0.050 * math.sqrt(2.0),   # Diagonal in XZ.
     0.050,                   # Lower vertical.
@@ -18,7 +18,8 @@ TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 def position(s: float) -> tuple[float, float, float]:
     """Return the centreline position in local maze coordinates, in metres.
 
-    Starts at (-0.050, -0.050, 0.200).
+    Starts 5 cm above the entrance at (-0.050, -0.050, 0.250).
+    Reaches the original maze entrance at s = 0.050.
     Ends at the mounting plate at (0, 0, 0).
     """
     if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH:
@@ -26,9 +27,9 @@ def position(s: float) -> tuple[float, float, float]:
             f"s must be finite and between 0 and {TOTAL_LENGTH} m"
         )
 
-    # Upper vertical.
+    # Approach and upper vertical: travel straight downward.
     if s <= SEGMENT_LENGTHS[0]:
-        return (-0.050, -0.050, 0.200 - s)
+        return (-0.050, -0.050, 0.250 - s)
 
     s -= SEGMENT_LENGTHS[0]
 

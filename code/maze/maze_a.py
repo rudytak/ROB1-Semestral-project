@@ -1,32 +1,27 @@
-import math
-import numpy as np
-
-SEGMENT_LENGTHS = (0.05, 0.025 * math.pi, 0.06, 0.015 * math.sqrt(2.0), 0.03)
-TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
-
 ################################################
 # MAZE GEOMETRY
 ################################################
 import math
 import numpy as np
 
-# Maze A: one straight vertical rail, 200 mm long.
-SEGMENT_LENGTHS = (0.200,)
+# Maze A: 50 mm approach + 200 mm straight vertical rail.
+SEGMENT_LENGTHS = (0.250,)
 TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 
 
 def position(s: float) -> tuple[float, float, float]:
     """Return the hoop centre in local maze coordinates, in metres.
 
-    s = 0.000 -> upper tip at (0, 0, 0.200).
-    s = 0.200 -> mounting plate at (0, 0, 0).
+    s = 0.000 -> start above the maze at (0, 0, 0.250).
+    s = 0.050 -> original maze entrance at (0, 0, 0.200).
+    s = 0.250 -> mounting plate at (0, 0, 0).
     """
     if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH:
         raise ValueError(
             f"s must be finite and between 0 and {TOTAL_LENGTH} m"
         )
 
-    return (0.0, 0.0, 0.200 - s)
+    return (0.0, 0.0, 0.250 - s)
 
 
 def rail_direction(s: float) -> tuple[float, float, float]:
@@ -36,9 +31,10 @@ def rail_direction(s: float) -> tuple[float, float, float]:
     return (0.0, 0.0, -1.0)
 
 
-def hoop_pose(s: float) -> np.ndarray:
+def hoop_pose(s: float, tilt: bool = False) -> np.ndarray:
     """Return the hoop's 4×4 pose in local maze coordinates.
 
+    tilt is accepted for compatibility but has no effect for maze A.
     Hoop +Z points upward, opposite travel.
     Hoop X and Y align with the maze's X and Y.
     """
@@ -53,7 +49,7 @@ def hoop_pose(s: float) -> np.ndarray:
 ################################################
 
 
-def visualize() -> None:
+def visualize(tilt: bool = False) -> None:
     """Interactive plot for the parametrization of the maze with the relevant transfromations for
     the hoop going through.
     """
@@ -75,7 +71,7 @@ def visualize() -> None:
 
     s_values.sort()
     points = [position(s) for s in s_values]
-    
+
     x, y, z = zip(*points)
 
     fig = plt.figure()
@@ -140,12 +136,11 @@ def visualize() -> None:
         valfmt="%.5f",
     )
 
-
     hoop_arrows = []
     hoop_labels = []
 
     def update(s):
-        T = hoop_pose(s)
+        T = hoop_pose(s, tilt=tilt)
 
         p = T[:3, 3]      # Hoop origin.
         R = T[:3, :3]    # Columns are hoop X, Y, Z directions.
@@ -196,18 +191,13 @@ def visualize() -> None:
     slider.on_changed(update)
     update(0.0)
 
-
-
     fig._maze_slider = slider
 
     plt.show()
 
 
-
-
-
 ################################################
 # DEBUG
 ################################################
-if __name__ == "__main__" :
-    visualize()
+if __name__ == "__main__":
+    visualize(tilt=True)

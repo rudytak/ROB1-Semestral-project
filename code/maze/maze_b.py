@@ -2,7 +2,7 @@ import math
 import numpy as np
 
 SEGMENT_LENGTHS = (
-    0.050,                   # Upper vertical.
+    0.100,                   # 5 cm approach + 5 cm upper vertical.
     0.070 * math.sqrt(2.0),   # Diagonal.
     0.080,                   # Lower vertical.
 )
@@ -16,16 +16,18 @@ TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 def position(s: float) -> tuple[float, float, float]:
     """Return the centreline position in local maze coordinates, in metres.
 
-    Starts at (0.070, 0, 0.200) and ends at (0, 0, 0).
+    Starts 5 cm above the entrance at (0.070, 0, 0.250).
+    Reaches the original maze entrance at s = 0.050.
+    Ends at the mounting plate at (0, 0, 0).
     """
     if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH:
         raise ValueError(
             f"s must be finite and between 0 and {TOTAL_LENGTH} m"
         )
 
-    # Upper vertical: travel downward.
+    # Approach and upper vertical: travel straight downward.
     if s <= SEGMENT_LENGTHS[0]:
-        return (0.070, 0.0, 0.200 - s)
+        return (0.070, 0.0, 0.250 - s)
 
     s -= SEGMENT_LENGTHS[0]
 
@@ -82,6 +84,7 @@ def hoop_pose(s: float, tilt: bool = False) -> np.ndarray:
 
     return T
 
+
 ################################################
 # DEBUG LIBRARY
 ################################################
@@ -109,7 +112,7 @@ def visualize(tilt: bool = False) -> None:
 
     s_values.sort()
     points = [position(s) for s in s_values]
-    
+
     x, y, z = zip(*points)
 
     fig = plt.figure()
@@ -174,7 +177,6 @@ def visualize(tilt: bool = False) -> None:
         valfmt="%.5f",
     )
 
-
     hoop_arrows = []
     hoop_labels = []
 
@@ -230,18 +232,13 @@ def visualize(tilt: bool = False) -> None:
     slider.on_changed(update)
     update(0.0)
 
-
-
     fig._maze_slider = slider
 
     plt.show()
 
 
-
-
-
 ################################################
 # DEBUG
 ################################################
-if __name__ == "__main__" :
+if __name__ == "__main__":
     visualize(tilt=True)

@@ -1,39 +1,73 @@
 import math
 import numpy as np
 
-SEGMENT_LENGTHS = (0.05, 0.025 * math.pi, 0.06, 0.015 * math.sqrt(2.0), 0.03)
+SEGMENT_LENGTHS = (
+    0.100,                    # 5 cm approach + original 5 cm straight.
+    0.025 * math.pi,           # Quarter-circle bend, radius 5 cm.
+    0.060,                    # Vertical.
+    0.015 * math.sqrt(2.0),    # Diagonal.
+    0.030,                    # Lower vertical.
+)
 TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
 
 ################################################
 # MAZE GEOMETRY
 ################################################
 
+
+def get_len() -> float:
+    return TOTAL_LENGTH
+
+
 def position(s: float) -> tuple[float, float, float]:
     """Return (x, y, z) at arc length s in [0, TOTAL_LENGTH], in m.
 
-    Starts at the top tip (0.085, 0, 0.155) and ends at the plate (0, 0, 0).
+    Starts at (0.135, 0, 0.155), 5 cm before the original entrance.
+    Reaches the original entrance at (0.085, 0, 0.155) at s = 0.050.
+    Ends at the mounting plate at (0, 0, 0).
     """
     if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH:
-        raise ValueError(f's must be finite and between 0 and {TOTAL_LENGTH} m')
-    if s <= 0.05:
-        return (0.085 - s, 0.0, 0.155)
-    s -= 0.05
+        raise ValueError(
+            f"s must be finite and between 0 and {TOTAL_LENGTH} m"
+        )
+
+    # Approach and original straight: travel toward decreasing X.
+    if s <= SEGMENT_LENGTHS[0]:
+        return (0.135 - s, 0.0, 0.155)
+
+    s -= SEGMENT_LENGTHS[0]
+
+    # Quarter-circle bend: retain the original 5 cm radius.
     if s <= SEGMENT_LENGTHS[1]:
         a = s / 0.05
-        return (0.035 - 0.05 * math.sin(a), 0.0, 0.105 + 0.05 * math.cos(a))
+        return (
+            0.035 - 0.05 * math.sin(a),
+            0.0,
+            0.105 + 0.05 * math.cos(a),
+        )
+
     s -= SEGMENT_LENGTHS[1]
-    if s <= 0.06:
+
+    # Vertical.
+    if s <= SEGMENT_LENGTHS[2]:
         return (-0.015, 0.0, 0.105 - s)
-    s -= 0.06
+
+    s -= SEGMENT_LENGTHS[2]
+
+    # Diagonal.
     if s <= SEGMENT_LENGTHS[3]:
         d = s / math.sqrt(2.0)
         return (-0.015 + d, 0.0, 0.045 - d)
+
     s -= SEGMENT_LENGTHS[3]
+
+    # Lower vertical.
     return (0.0, 0.0, 0.03 - s)
 
 
 def rail_direction(s: float) -> tuple[float, float, float]:
     """Return the unit direction along the rail toward increasing s.
+
     At sharp corners, use the outgoing segment's direction.
     """
     position(s)
@@ -42,11 +76,11 @@ def rail_direction(s: float) -> tuple[float, float, float]:
     corner_1 = sum(SEGMENT_LENGTHS[:3])
     corner_2 = sum(SEGMENT_LENGTHS[:4])
 
-    if s < 0.05:
+    if s < SEGMENT_LENGTHS[0]:
         return (-1.0, 0.0, 0.0)
 
     if s < bend_end:
-        angle = (s - 0.05) / 0.05
+        angle = (s - SEGMENT_LENGTHS[0]) / 0.05
         return (-math.cos(angle), 0.0, -math.sin(angle))
 
     if s < corner_1:
@@ -59,15 +93,16 @@ def rail_direction(s: float) -> tuple[float, float, float]:
     return (0.0, 0.0, -1.0)
 
 
-def hoop_pose(s: float) -> np.ndarray:
+def hoop_pose(s: float, tilt: bool = True) -> np.ndarray:
     """Return the hoop's 4×4 pose in local maze coordinates.
 
     Position is in metres.
     Hoop +Z points opposite travel, so it moves along local -Z.
+    As in the supplied version, tilt is accepted but not used.
     """
     z_axis = -np.array(rail_direction(s), dtype=float)
 
-    # Fix the rotation around Z by choosing X along maze +Y.
+    # Keep hoop Y aligned with maze +Y.
     y_axis = np.array([0.0, 1.0, 0.0])
     x_axis = np.cross(y_axis, z_axis)
 
@@ -76,6 +111,7 @@ def hoop_pose(s: float) -> np.ndarray:
     T[:3, 3] = position(s)
 
     return T
+
 
 ################################################
 # DEBUG LIBRARY
@@ -104,7 +140,7 @@ def visualize() -> None:
 
     s_values.sort()
     points = [position(s) for s in s_values]
-    
+
     x, y, z = zip(*points)
 
     fig = plt.figure()
@@ -169,7 +205,6 @@ def visualize() -> None:
         valfmt="%.5f",
     )
 
-
     hoop_arrows = []
     hoop_labels = []
 
@@ -225,18 +260,13 @@ def visualize() -> None:
     slider.on_changed(update)
     update(0.0)
 
-
-
     fig._maze_slider = slider
 
     plt.show()
 
 
-
-
-
 ################################################
 # DEBUG
 ################################################
-if __name__ == "__main__" :
+if __name__ == "__main__":
     visualize()
