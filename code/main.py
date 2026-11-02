@@ -14,9 +14,10 @@ def print_menu(maze_name, home):
     print("[q] Go home, close robot, and quit")
 
 
-def select_maze(curent_maze=None):
+def select_maze(current_maze=None):
     while True:
         print("\nSelect maze: [a] [b] [c] [d]")
+        print(f"[Enter] Keep {current_maze.upper()}")
         print("[q] Cancel")
 
         choice = input("> ").strip().lower()
