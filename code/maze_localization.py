@@ -3,7 +3,10 @@ import time
 import numpy as np
 from camera import estimate_aruco_world_positions
 from helper import euler_xyz_to_matrix
-from maze_d import hoop_pose
+from maze_a import hoop_pose_a
+from maze_d import hoop_pose_d
+
+X_OFFSET = 0.15
 
 
 def extract_markers_by_id(detections):
@@ -35,12 +38,22 @@ class MazePredictor:
         self.theta0 = 0.0
         self.omega = float(omega) if omega is not None else 0.0
 
+    def _fit_circle_with_least_squares(self, pts):
+        # Circle fitting using algebraic least-squares: (x - cx)^2 + (y - cy)^2 = r^2
+        x, y = pts[:, 0], pts[:, 1]
+        A = np.column_stack([x, y, np.ones_like(x)])
+        b = x**2 + y**2
+        c, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        x_c = float(c[0] / 2.0)
+        y_c = float(c[1] / 2.0)
+        radius = float(np.sqrt(max(0.0, c[2] + x_c**2 + y_c**2)))
+        return x_c, y_c, radius
+
     def estimate_rotational_table_geometry(
         self, robot, calibration, num_measurements=10, delay=0.1, marker_ids=(1, 2), fit_circle=True
     ):
         """Estimate rotation center and height of the table using ArUco markers."""
-        maze_axis_points = []
-        heights = []
+        pts1, pts2, midpoints, heights = [], [], [], []
 
         for _ in range(num_measurements):
             img = robot.grab_image()
@@ -49,39 +62,54 @@ class MazePredictor:
 
             # Both markers must be visible to reliably compute the base center
             if marker_ids[0] in markers and marker_ids[1] in markers:
-                center = (markers[marker_ids[0]] + markers[marker_ids[1]]) / 2.0
-                maze_axis_points.append(center)
-                heights.append(center[2])
+                m1, m2 = markers[marker_ids[0]], markers[marker_ids[1]]
+                pts1.append(m1)
+                pts2.append(m2)
+                midpoints.append((m1 + m2) / 2.0)
+                heights.extend([m1[2], m2[2]])
             else:
                 time.sleep(delay)
                 continue
 
             time.sleep(delay)
 
-        if len(maze_axis_points) < 3:
-            print(
-                f"Warning: Not enough valid measurements to estimate geometry: "
-                f"{len(maze_axis_points)}/{num_measurements} (minimum 3 required)."
-            )
+        if len(pts1) < 3:
+            print(f"Warning: Not enough valid measurements ({len(pts1)}).")
             return False
 
-        pts = np.asarray(maze_axis_points)
-        x, y = pts[:, 0], pts[:, 1]
+        pts1, pts2, midpoints = np.asarray(pts1), np.asarray(pts2), np.asarray(midpoints)
         self.center_z = float(np.mean(heights))
 
         if fit_circle:
-            # Circle fitting using algebraic least-squares: (x - cx)^2 + (y - cy)^2 = r^2
-            A = np.column_stack([x, y, np.ones_like(x)])
-            b = x**2 + y**2
-            c, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+            x_c1, y_c1, r1 = self._fit_circle_with_least_squares(pts1)
+            x_c2, y_c2, r2 = self._fit_circle_with_least_squares(pts2)
+            x_c_diff, y_c_diff, r_diff = self._fit_circle_with_least_squares(midpoints)
 
-            self.center_x = float(c[0] / 2.0)
-            self.center_y = float(c[1] / 2.0)
-            self.radius = float(np.sqrt(max(0.0, c[2] + self.center_x**2 + self.center_y**2)))
+            # if the radius is small, then I don't trust the fit as much
+            total_weight = r1 + r2 + r_diff
+            if total_weight > 1e-6:
+                self.center_x = (x_c1 * r1 + x_c2 * r2 + x_c_diff * r_diff) / total_weight
+                self.center_y = (y_c1 * r1 + y_c2 * r2 + y_c_diff * r_diff) / total_weight
+            else:
+                self.center_x, self.center_y = x_c_diff, y_c_diff
+
+            distances = []
+            for point in midpoints:
+                # diffrence bettwen point and center
+                dx = point[0] - self.center_x
+                dy = point[1] - self.center_y
+
+                # length of the diffrence
+                dist = np.sqrt(dx**2 + dy**2)
+                distances.append(dist)
+
+            # mean of the distances should average to the radius
+            self.radius = float(np.mean(distances))
+
         else:
             # Base plate centered on rotation axis
-            self.center_x = float(np.mean(x))
-            self.center_y = float(np.mean(y))
+            self.center_x = float(np.mean(midpoints[:, 0]))
+            self.center_y = float(np.mean(midpoints[:, 1]))
             self.radius = 0.0
 
         return True
@@ -165,30 +193,50 @@ class MazePredictor:
         dt = target_time - self.t0
         return self.theta0 + (self.omega * dt)
 
-    def get_target_pose(self, s, time_delay_s=0.0):
+    def get_target_pose(self, s, maze=0, time_delay_s=0.0):
         """Return 4x4 homogeneous transformation matrix of the hoop pose in robot-base coordinates."""
         target_time = time.time() + time_delay_s
         theta = self._predict_angle(target_time)
 
         # Transformation from robot base to table rotation center
-        T_base_center = np.eye(4)
-        T_base_center[:3, 3] = [self.center_x, self.center_y, self.center_z]
+        T_base_to_table_center = np.eye(4)
+        T_base_to_table_center[:3, 3] = [self.center_x + X_OFFSET, self.center_y, self.center_z]
 
         # Table rotation around Z-axis
         c_t, s_t = np.cos(theta), np.sin(theta)
-        T_rot = np.array([[c_t, -s_t, 0.0, 0.0], [s_t, c_t, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+        T_table_rot = np.array(
+            [[c_t, -s_t, 0.0, 0.0], [s_t, c_t, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+        )
 
         # Radius offset (if maze origin is shifted relative to rotation center)
-        T_radius = np.eye(4)
-        T_radius[0, 3] = self.radius
+        T_table_center_to_maze_base = np.eye(4)
+        T_table_center_to_maze_base[0, 3] = self.radius
 
-        # Hoop pose in local maze coordinates
-        t_flange_hoop_offset = np.array([-0.135, 0.135, 0])
+        # 2 cm above the base plate offset, so we stop at the right height
+        T_maze_base_to_maze_finish = np.eye(4)
+        T_maze_base_to_maze_finish[2, 3] += 0.02  # 2 cm above te aruco markers base
 
-        T_maze_hoop = np.eye(4)
-        T_maze_hoop[:3, :3] = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
-        T_maze_hoop[:3, 3] = t_flange_hoop_offset
-        T_maze_hoop[2, 3] += 0.3  # 30 cm above maze base
-        # T_maze_hoop = hoop_pose(s)
+        match maze:
+            case 0:
+                T_maze_finish_to_current_maze_hoop_pos = np.eye(4)
+                T_maze_finish_to_current_maze_hoop_pos[2, 3] += 0.3  # 30 cm above maze base
 
-        return T_base_center @ T_rot @ T_radius @ T_maze_hoop
+            case 1:
+                T_maze_finish_to_current_maze_hoop_pos = hoop_pose_a(s)
+
+            case 2:
+                pass
+
+            case 3:
+                pass
+
+            case 4:
+                T_maze_finish_to_current_maze_hoop_pos = hoop_pose_d(s)
+
+        return (
+            T_base_to_table_center
+            @ T_table_rot
+            @ T_table_center_to_maze_base
+            @ T_maze_base_to_maze_finish
+            @ T_maze_finish_to_current_maze_hoop_pos
+        )

@@ -1,20 +1,22 @@
 import math
+
 import numpy as np
 
 SEGMENT_LENGTHS = (0.05, 0.025 * math.pi, 0.06, 0.015 * math.sqrt(2.0), 0.03)
-TOTAL_LENGTH = sum(SEGMENT_LENGTHS)
+TOTAL_LENGTH_D = sum(SEGMENT_LENGTHS)
 
 ################################################
 # MAZE GEOMETRY
 ################################################
+
 
 def position(s: float) -> tuple[float, float, float]:
     """Return (x, y, z) at arc length s in [0, TOTAL_LENGTH], in m.
 
     Starts at the top tip (0.085, 0, 0.155) and ends at the plate (0, 0, 0).
     """
-    if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH:
-        raise ValueError(f's must be finite and between 0 and {TOTAL_LENGTH} m')
+    if not math.isfinite(s) or not 0.0 <= s <= TOTAL_LENGTH_D:
+        raise ValueError(f"s must be finite and between 0 and {TOTAL_LENGTH_D} m")
     if s <= 0.05:
         return (0.085 - s, 0.0, 0.155)
     s -= 0.05
@@ -59,7 +61,7 @@ def rail_direction(s: float) -> tuple[float, float, float]:
     return (0.0, 0.0, -1.0)
 
 
-def hoop_pose(s: float) -> np.ndarray:
+def hoop_pose_d(s: float) -> np.ndarray:
     """Return the hoop's 4×4 pose in local maze coordinates.
 
     Position is in metres.
@@ -77,6 +79,7 @@ def hoop_pose(s: float) -> np.ndarray:
 
     return T
 
+
 ################################################
 # DEBUG LIBRARY
 ################################################
@@ -91,10 +94,7 @@ def visualize() -> None:
 
     # Sample positions along the rail.
     count = 500
-    s_values = [
-        TOTAL_LENGTH * i / (count - 1)
-        for i in range(count)
-    ]
+    s_values = [TOTAL_LENGTH_D * i / (count - 1) for i in range(count)]
 
     # Include section boundaries to preserve the sharp corners.
     boundary = 0.0
@@ -104,14 +104,13 @@ def visualize() -> None:
 
     s_values.sort()
     points = [position(s) for s in s_values]
-    
+
     x, y, z = zip(*points)
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
 
-    ax.plot(x, y, z, color="black", linewidth=2,
-            label="Rail centreline")
+    ax.plot(x, y, z, color="black", linewidth=2, label="Rail centreline")
     ax.scatter(*points[0], color="blue", label="Start")
     ax.scatter(0, 0, 0, color="black", label="Base origin")
 
@@ -125,7 +124,10 @@ def visualize() -> None:
 
     for direction, color, label in axes:
         ax.quiver(
-            0, 0, 0, *direction,
+            0,
+            0,
+            0,
+            *direction,
             color=color,
             arrow_length_ratio=0.2,
         )
@@ -133,17 +135,17 @@ def visualize() -> None:
 
     # Moving point starts at the upper tip.
     px, py, pz = position(0)
-    moving_point, = ax.plot(
-        [px], [py], [pz],
+    (moving_point,) = ax.plot(
+        [px],
+        [py],
+        [pz],
         "o",
         color="orange",
         markersize=9,
         label="Selected position",
     )
 
-    coordinate_text = fig.text(
-        0.15, 0.13, "", family="monospace"
-    )
+    coordinate_text = fig.text(0.15, 0.13, "", family="monospace")
 
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
@@ -164,20 +166,19 @@ def visualize() -> None:
         slider_ax,
         "s [m]",
         0.0,
-        TOTAL_LENGTH,
+        TOTAL_LENGTH_D,
         valinit=0.0,
         valfmt="%.5f",
     )
-
 
     hoop_arrows = []
     hoop_labels = []
 
     def update(s):
-        T = hoop_pose(s)
+        T = hoop_pose_d(s)
 
-        p = T[:3, 3]      # Hoop origin.
-        R = T[:3, :3]    # Columns are hoop X, Y, Z directions.
+        p = T[:3, 3]  # Hoop origin.
+        R = T[:3, :3]  # Columns are hoop X, Y, Z directions.
 
         moving_point.set_data_3d([p[0]], [p[1]], [p[2]])
 
@@ -191,11 +192,13 @@ def visualize() -> None:
 
         arrow_length = 0.025
 
-        for i, (color, name) in enumerate([
-            ("red", "Xh"),
-            ("green", "Yh"),
-            ("blue", "Zh"),
-        ]):
+        for i, (color, name) in enumerate(
+            [
+                ("red", "Xh"),
+                ("green", "Yh"),
+                ("blue", "Zh"),
+            ]
+        ):
             direction = R[:, i]
 
             arrow = ax.quiver(
@@ -210,9 +213,7 @@ def visualize() -> None:
             hoop_arrows.append(arrow)
 
             tip = p + arrow_length * direction
-            hoop_labels.append(
-                ax.text(*tip, name, color=color)
-            )
+            hoop_labels.append(ax.text(*tip, name, color=color))
 
         coordinate_text.set_text(
             f"Position [m]: ({p[0]:.5f}, {p[1]:.5f}, {p[2]:.5f})\n"
@@ -225,18 +226,13 @@ def visualize() -> None:
     slider.on_changed(update)
     update(0.0)
 
-
-
     fig._maze_slider = slider
 
     plt.show()
 
 
-
-
-
 ################################################
 # DEBUG
 ################################################
-if __name__ == "__main__" :
+if __name__ == "__main__":
     visualize()
