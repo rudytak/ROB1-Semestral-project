@@ -1,300 +1,161 @@
-from matplotlib import pyplot as plt
-import numpy as np
-import cv2 as cv
-from helper import euler_xyz_to_matrix
-import time
-
 from ctu_crs import CRS97
-from camera import take_calibration_pictures, save_camera_calibration, load_camera_calibration, detect_ArUco, estimate_aruco_world_positions
+from camera import load_camera_calibration
+from sequence import calculate, run_sequence
 
 
-from maze import maze_b as maze
+def print_menu(maze_name, home):
+    print("\n" + "-" * 45)
+    print(f"Selected maze: {maze_name.upper()}")
+    print(f"Automatic homing before start: "
+          f"{'ON' if home else 'OFF'}")
+    print("[s] Select maze and start sequence")
+    print("[b] Toggle automatic homing")
+    print("[h] Go home now")
+    print("[q] Go home, close robot, and quit")
 
 
-PREDICTION_LEAD = 0.8  # seconds
+def select_maze():
+    while True:
+        print("\nSelect maze: [a] [b] [c] [d]")
+        print("[q] Cancel")
 
-def maze_base_pose(p1, p2) -> np.ndarray:
-    """Maze-base pose from the two marker centres, in robot coordinates.
-    marker id 1 upper-left, marker id 2
-    """
-    p1 = np.asarray(p1, dtype=float)
-    p2 = np.asarray(p2, dtype=float)
+        choice = input("> ").strip().lower()
 
-    z_axis = np.array([0.0, 0.0, 1.0])
+        if choice in ("a", "b", "c", "d"):
+            return choice
 
-    diagonal = p1 - p2
-    diagonal[2] = 0.0
+        if choice == "q":
+            return None
 
-    length = np.linalg.norm(diagonal)
+        print("Please select a, b, c, d, or q.")
 
-    diagonal /= length
 
-    # Correct for the diagonal marker arrangement.
-    y_axis = diagonal + np.cross(diagonal, z_axis)
-    y_axis /= np.linalg.norm(y_axis)
+def connect_robot(home):
+    robot = CRS97()
 
-    x_axis = np.cross(y_axis, z_axis)
+    try:
+        robot.initialize(home=home)
+    except BaseException:
+        try:
+            robot.close()
+        except Exception:
+            pass
+        raise
 
-    T = np.eye(4)
-    T[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
-    T[:3, 3] = (p1 + p2) / 2.0
+    return robot
 
-    return T
+
+def go_home(robot):
+    print("Going home...")
+    robot.move_to_q(robot.q_home)
+    robot.wait_for_motion_stop()
+    print("Robot is home.")
+
 
 def main():
-    R_Bmaze_last = None
+    maze_name = "a"
+    home = True
+    robot = None
 
-    robot = CRS97()
-    robot.initialize(home=True)
+    try:
+        while True:
+            print_menu(maze_name, home)
+            key = input("> ").strip().lower()
 
+            if key == "b":
+                home = not home
+                continue
 
-    # robot.initialize(home=False)
+            if key == "q":
+                try:
+                    if robot is None:
+                        robot = connect_robot(home)
 
-    # # Taking calibration pictures
-    # take_calibration_pictures(robot, divisions=(3,5,5))
-    # take_calibration_pictures(robot, divisions=(2,2,2))
+                    go_home(robot)
 
-    # # Calibrating camera (getting P,K matrices)
-    # calib_results = save_camera_calibration()
-    # print(calib_results)
-
-    # Load camera calibration data:
-    calib_results = load_camera_calibration()
-    print('P = ', calib_results['P'])
-    print('K = ', calib_results['K'])
-    print('R_CB = ', calib_results['R_CB'])
-    print('t_CB = ', calib_results['t_CB'])
-    print("-"*50)
-
-    # Collect maze-base positions and orientations.
-    start_t = time.monotonic()
-    ts, phis = [], []
-    cx, cy, cz = [], [], []
+                except Exception as exc:
+                    print(f"Could not go home: {exc}")
 
-    while time.monotonic() - start_t < 15:
-        img = robot.grab_image()
-        frame_time = time.monotonic()
-        res = estimate_aruco_world_positions(img, calib_results)
-
-        detections = {d["id"]: d for d in res}
-
-        if 1 in detections and 2 in detections:
-            vec1 = detections[1]["T_BM"][:3, 3]
-            vec2 = detections[2]["T_BM"][:3, 3]
+                break
 
-            T_Bmaze_measured = maze_base_pose(vec1, vec2)
+            try:
+                if key == "h":
+                    if robot is None:
+                        robot = connect_robot(home)
 
-            # Heading of the maze's +X axis in the robot's XY plane.
-            phi = np.arctan2(
-                T_Bmaze_measured[1, 0],
-                T_Bmaze_measured[0, 0],
-            )
+                    go_home(robot)
 
-            midpoint = T_Bmaze_measured[:3, 3]
+                elif key == "s":
+                    selected = select_maze()
 
-            ts.append(frame_time)
-            phis.append(phi)
-            cx.append(midpoint[0])
-            cy.append(midpoint[1])
-            cz.append(midpoint[2])
+                    if selected is None:
+                        continue
 
-            print(
-                f"Took img {len(ts)} "
-                f"at {frame_time - start_t:.3f} s"
-            )
+                    maze_name = selected
 
-    if len(ts) < 3:
-        raise ValueError("Not enough observations of markers 1 and 2.")
+                    maze = __import__(
+                        f"maze.maze_{maze_name}",
+                        fromlist=["hoop_pose"],
+                    )
 
+                    # Load the saved camera calibration.
+                    calibration = load_camera_calibration()
 
-    
-    sample_times = np.asarray(ts)
-    xy = np.column_stack((cx, cy))
+                    if robot is None:
+                        robot = connect_robot(home)
+                    elif home:
+                        go_home(robot)
 
-    # Remove jumps between +pi and -pi.
-    measured_phis = np.unwrap(np.asarray(phis))
+                    # False for A/B/C, True for D.
+                    tilt = maze_name == "d"
 
-    # Fit phi(t) = phi_last + omega * (t - last_time).
-    last_time = sample_times[-1]
-    relative_times = sample_times - last_time
+                    # Observe the maze and estimate table motion.
+                    print("\nMeasuring table motion...")
+                    model = calculate(robot, calibration)
 
-    omega_scalar, phi_last = np.polyfit(
-        relative_times, measured_phis, 1
-    )
+                    # Wait before starting the actual traversal.
+                    print(
+                        f"\nPreparation finished for maze "
+                        f"{maze_name.upper()}."
+                    )
 
-    # Fit:
-    # maze_position_xy = table_center_xy + Rz(phi) @ offset_xy
-    #
-    # Unknowns: center_x, center_y, offset_x, offset_y.
-    c = np.cos(measured_phis)
-    sn = np.sin(measured_phis)
+                    while True:
+                        choice = input(
+                            "Press Enter to start, or q + Enter to cancel: "
+                        ).strip().lower()
 
-    A = np.zeros((2 * len(ts), 4))
+                        if choice in ("", "q"):
+                            break
 
-    # X equations.
-    A[0::2, 0] = 1.0
-    A[0::2, 2] = c
-    A[0::2, 3] = -sn
+                        print("Press Enter without typing, or type q.")
 
-    # Y equations.
-    A[1::2, 1] = 1.0
-    A[1::2, 2] = sn
-    A[1::2, 3] = c
+                    if choice == "q":
+                        print("Sequence cancelled. Returning to the menu.")
+                        continue
 
-    solution, _, rank, singular_values = np.linalg.lstsq(
-        A, xy.reshape(-1), rcond=None
-    )
+                    run_sequence(
+                        robot,
+                        maze,
+                        model,
+                        tilt=tilt,
+                    )
 
-    if (
-        rank < 4
-        or singular_values[-1] / singular_values[0] < 1e-3
-    ):
-        raise ValueError(
-            "Too little observed rotation to estimate the table centre."
-        )
 
-    # Rotation-axis position, using mean marker height.
-    center = np.array([
-        solution[0],
-        solution[1],
-        np.mean(cz),
-    ])
+                else:
+                    print("Unknown command. Use s, b, h, or q.")
 
-    # Vector from rotation axis to maze origin,
-    # expressed along the maze's local axes.
-    offset_local = np.array([
-        solution[2],
-        solution[3],
-        0.0,
-    ])
+            except Exception as exc:
+                print(f"Action failed: {exc}")
 
+    except (KeyboardInterrupt, EOFError):
+        print("\nInterrupted. Closing the robot connection.")
 
+    finally:
+        if robot is not None:
+            robot.close()
 
-
-    s_max = maze.get_len()
-    s = 0
-    s_step_const = 0.003
-    s_step = s_step_const
-    s_turn = s_max - 0.05 # when to turn around and go back to the start
-    tilt = False
-
-
-
-    # Current tool offset.
-    p_FH = np.array([-0.135, 0.135, 0.0])
-    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
-
-    # R_HF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
-
-    # T_FH = np.eye(4)
-    # # T_FH[:3, :3] = R_HF.T
-    # T_FH[:3, 3] = p_FH
-    # T_HF = np.linalg.inv(T_FH)
-
-    move_start = time.time()
-    while True:
-        dt = time.monotonic() - last_time
-
-        phi = phi_last + omega_scalar * (dt + PREDICTION_LEAD)
-
-        # Predict orientation and position using the same angle.
-        R_Bmaze = euler_xyz_to_matrix((0.0, 0.0, phi))
-        p_Bmaze = center + R_Bmaze @ offset_local + np.array([0,0,0.00])
-
-        # Get the hoop position and orientation in maze coordinates.
-        T_maze_H = maze.hoop_pose(s, tilt=tilt)
-
-        p_maze_H = T_maze_H[:3, 3]
-        R_tilt_maze = T_maze_H[:3, :3]
-
-        # Transform the hoop centre into robot-base coordinates.
-        p_BH_target = p_Bmaze + R_Bmaze @ p_maze_H
-
-        # Express the local tilt in robot-base coordinates.
-        R_tilt_B = R_Bmaze @ R_tilt_maze @ R_Bmaze.T
-
-        # Apply that tilt to your known working orientation.
-        R_BF = R_tilt_B @ R_BF_neutral
-
-        # Construct the complete 4×4 flange target.
-        T_BF_target = np.eye(4)
-        T_BF_target[:3, :3] = R_BF
-        T_BF_target[:3, 3] = p_BH_target - R_BF @ p_FH
-
-        # T_Bmaze = np.eye(4)
-        # T_Bmaze[:3, :3] = R_Bmaze
-        # T_Bmaze[:3, 3] = p_Bmaze
-
-        # # Local maze target -> robot-base hoop target -> flange target.
-        # R_BF = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
-
-        # p_maze_H = np.asarray(maze.position(s))
-        # p_BH_target = p_Bmaze - R_BF @ p_FH
-
-        # T_BF_target = np.eye(4)
-        # T_BF_target = R_BF
-        # T_BF_target = p_BH_target - R_BF @ p_FH
-
-        # # T_maze_H = maze.hoop_pose(s, tilt=tilt)
-        # # T_BH_target = T_Bmaze @ T_maze_H
-        # # T_BF_target = T_BH_target @ T_HF
-
-        ik_sols = robot.ik(T_BF_target)
-        ik_sols = [
-            q for q in ik_sols
-            if robot.in_limits(q)
-        ]
-
-        print(len(ik_sols))
-
-        if len(ik_sols) > 0:
-            q0 = robot.q_home
-            closest_solution = min(
-                ik_sols,
-                key=lambda q: np.linalg.norm(q - q0),
-            )
-
-            robot.move_to_q(closest_solution)
-            robot.wait_for_motion_stop()
-
-            if time.time() - move_start > 8:
-
-                # The turnaround target has just been reached.
-                if s_step > 0 and s >= s_turn:
-                    s_step = -s_step_const
-
-                # The return to the starting point has completed.
-                elif s_step < 0 and s <= 0.0:
-                    print("Returned to the starting point.")
-                    break
-
-                # Select the next target without crossing either end.
-                s = min(s_turn, max(0.0, s + s_step))
-
-
-    robot.close()
-
-
-
+        print("Application closed.")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# EOF
