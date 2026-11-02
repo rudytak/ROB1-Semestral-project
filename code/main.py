@@ -14,12 +14,15 @@ def print_menu(maze_name, home):
     print("[q] Go home, close robot, and quit")
 
 
-def select_maze():
+def select_maze(curent_maze=None):
     while True:
         print("\nSelect maze: [a] [b] [c] [d]")
         print("[q] Cancel")
 
         choice = input("> ").strip().lower()
+
+        if choice == "":
+            return current_maze
 
         if choice in ("a", "b", "c", "d"):
             return choice
@@ -86,7 +89,7 @@ def main():
                     go_home(robot)
 
                 elif key == "s":
-                    selected = select_maze()
+                    selected = select_maze(maze_name)
 
                     if selected is None:
                         continue

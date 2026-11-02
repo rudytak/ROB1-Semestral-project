@@ -6,7 +6,7 @@ from helper import euler_xyz_to_matrix
 
 
 PREDICTION_LEAD = 0.8
-OBSERVATION_TIME = 15.0
+OBSERVATION_TIME = 25.0
 START_DELAY = 8.0
 PATH_STEP = 0.003
 END_MARGIN = 0.05
@@ -162,10 +162,13 @@ def run_sequence(robot, maze, model, tilt=False):
     s = 0.0
     s_step = PATH_STEP
 
+    # left neutral -> heading hoop from y axis - frame   to y axis + hoop
     p_FH = np.array([-0.135, 0.135, 0.0])
-    R_BF_neutral = euler_xyz_to_matrix(
-        (0, -np.pi, np.pi / 2)
-    )
+    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
+
+    # front neutral -> heading hoop from x axis - frame  to x axis + hoop
+    p_FH = np.array([0, 0, 0.0])
+    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, 0))
 
     move_start = time.monotonic()
 
