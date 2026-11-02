@@ -170,6 +170,10 @@ def run_sequence(robot, maze, model, tilt=False):
     p_FH = np.array([0, 0, 0.0])
     R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, 0))
 
+    # right neutral -> heading hoop from y axis + frame   to y axis - hoop
+    p_FH = np.array([-0.135, -0.135, 0.0])
+    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, -np.pi / 2))
+
     move_start = time.monotonic()
 
     while True:
