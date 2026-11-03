@@ -58,7 +58,7 @@ def go_home(robot):
 
 def main():
     maze_name = "a"
-    home = True
+    home = False
     robot = None
 
     try:
