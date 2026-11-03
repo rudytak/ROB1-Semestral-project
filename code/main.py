@@ -144,6 +144,7 @@ def main():
                         tilt=tilt,
                     )
 
+                    go_home(robot)
 
                 else:
                     print("Unknown command. Use s, b, h, or q.")

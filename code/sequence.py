@@ -2,15 +2,25 @@ import time
 import numpy as np
 
 from camera import estimate_aruco_world_positions
-from helper import euler_xyz_to_matrix
+from helper import euler_xyz_to_matrix, print_pose
 
 
-PREDICTION_LEAD = 0.8
-OBSERVATION_TIME = 25.0
+# PREDICTION_LEAD = 2.4
+PREDICTION_LEAD = 1
+
+OBSERVATION_TIME = 15.0
 START_DELAY = 8.0
-PATH_STEP = 0.003
-END_MARGIN = 0.05
+PATH_STEP = 0.0003
+# PATH_STEP = 0.04
+# PATH_STEP = 0.0
+END_MARGIN = 0.03
 
+
+T_FLANGE_TO_HOOP = np.eye(4)
+T_FLANGE_TO_HOOP[:3, :3] = euler_xyz_to_matrix((0, np.pi, 3*np.pi/8))
+T_FLANGE_TO_HOOP[:3, 3] = [-0.135, 0.0, 0.0066]
+
+T_HOOP_TO_FLANGE = np.linalg.inv(T_FLANGE_TO_HOOP)
 
 def maze_base_pose(p1, p2):
     """Calculate the maze-base pose from the marker centres."""
@@ -162,19 +172,36 @@ def run_sequence(robot, maze, model, tilt=False):
     s = 0.0
     s_step = PATH_STEP
 
-    # left neutral -> heading hoop from y axis - frame   to y axis + hoop
-    p_FH = np.array([-0.135, 0.135, 0.0])
-    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
+    # # left neutral -> heading hoop from y axis - frame   to y axis + hoop
+    # p_FH = np.array([-0.135, 0.135, 0.0])
+    # R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
 
-    # front neutral -> heading hoop from x axis - frame  to x axis + hoop
-    p_FH = np.array([0, 0, 0.0])
-    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, 0))
+    # # front neutral -> heading hoop from x axis - frame  to x axis + hoop
+    # p_FH = np.array([0, 0, 0.0])
+    # R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, 0))
 
-    # right neutral -> heading hoop from y axis + frame   to y axis - hoop
-    p_FH = np.array([-0.135, -0.135, 0.0])
-    R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, -np.pi / 2))
+    # # right neutral -> heading hoop from y axis + frame   to y axis - hoop
+    # p_FH = np.array([-0.135, -0.135, 0.0])
+    # R_BF_neutral = euler_xyz_to_matrix((0, -np.pi, -np.pi / 2))
 
     move_start = time.monotonic()
+
+
+    # start above maze
+    # T_start = np.eye(4)
+
+    # T_start = np.array([[ 0.7016,  0.7016, -0.1245,  0.5815],
+    #                    [ 0.088,  0.088,   0.9922, -0.0129],
+    #                    [ 0.7071, -0.7071,  0.0,      0.3208],
+    #                    [ 0.0,      0.0,      0.0 ,     1.0    ]])
+
+    # print(
+    #     "T_BF_target:\n"
+    #     f"{np.array2string(T_start, precision=4, suppress_small=True)}"
+    # )
+
+    # robot.move_to_q(robot.ik(T_start @ T_HOOP_TO_FLANGE))
+    # time.sleep(4)
 
     while True:
         dt = time.monotonic() - model["last_time"]
@@ -194,28 +221,48 @@ def run_sequence(robot, maze, model, tilt=False):
 
         T_maze_H = maze.hoop_pose(s, tilt=tilt)
 
-        p_BH_target = (
-            p_Bmaze
-            + R_Bmaze @ T_maze_H[:3, 3]
-        )
+        # p_BH_target = (
+        #     p_Bmaze
+        #     + R_Bmaze @ T_maze_H[:3, 3]
+        # )
 
-        R_tilt_B = (
-            R_Bmaze
-            @ T_maze_H[:3, :3]
-            @ R_Bmaze.T
-        )
-        R_BF = R_tilt_B @ R_BF_neutral
+        # R_tilt_B = (
+        #     R_Bmaze
+        #     @ T_maze_H[:3, :3]
+        #     @ R_Bmaze.T
+        # )
+        # R_BF = R_tilt_B @ R_BF_neutral
 
+        """
         T_BF_target = np.eye(4)
         T_BF_target[:3, :3] = R_BF
         T_BF_target[:3, 3] = (
             p_BH_target - R_BF @ p_FH
         )
+        """
+
+        T_B_to_maze_base = np.eye(4)
+        T_B_to_maze_base[:3, 3] = p_Bmaze
+        T_B_to_maze_base[:3, :3] = R_Bmaze
+        T_B_to_maze_base[0, 3] += 0.135
+        # T_B_to_maze_base[0, 3] += 0.14
+
+
+        T_BH = T_B_to_maze_base @ T_maze_H
+
+        T_BH[:3, :3] = np.eye(3)
+
+        T_BF_target = T_BH @ T_HOOP_TO_FLANGE
+
+        print_pose(T_B_to_maze_base, "maze base")
+        print_pose(T_BH, "hoop")
+        print_pose(T_BF_target, "flange")
 
         print(
             f"\ns = {s:.4f} m | "
             f"step = {s_step:+.4f} m"
         )
+
         print(
             "T_BF_target:\n"
             f"{np.array2string(T_BF_target, precision=4, suppress_small=True)}"
@@ -236,7 +283,7 @@ def run_sequence(robot, maze, model, tilt=False):
             print(
                 "No valid IK solution. Returning to the menu."
             )
-            return
+            continue
 
         closest_solution = min(
             ik_sols,

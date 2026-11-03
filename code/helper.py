@@ -1,5 +1,14 @@
 import numpy as np
 
+def print_pose(T, name=""):
+    np.set_printoptions(precision=3, suppress=True)
+    print(f"\n--- {name} ---")
+    print(f"Pozice (x, y, z) [m]: {T[:3, 3]}")
+    print(f"Osa X míří do:      {T[:3, 0]}")
+    print(f"Osa Y míří do:      {T[:3, 1]}")
+    print(f"Osa Z míří do:      {T[:3, 2]}")
+    print("-" * 40)
+
 def euler_xyz_to_matrix(rpy):
     roll, pitch, yaw = np.asarray(rpy, dtype = float)
 

@@ -2,7 +2,9 @@ import math
 import numpy as np
 
 SEGMENT_LENGTHS = (
-    0.100,                    # 5 cm approach + original 5 cm straight.
+    # 0.100,                    # 5 cm approach + original 5 cm straight.
+    
+    0.05,
     0.025 * math.pi,           # Quarter-circle bend, radius 5 cm.
     0.060,                    # Vertical.
     0.015 * math.sqrt(2.0),    # Diagonal.
@@ -33,8 +35,8 @@ def position(s: float) -> tuple[float, float, float]:
 
     # Approach and original straight: travel toward decreasing X.
     if s <= SEGMENT_LENGTHS[0]:
-        return (0.135 - s, 0.0, 0.155)
-
+        # return (0.135 - s, 0.0, 0.155)
+        return (0.135 - 0.05 - s, 0.0, 0.155)
     s -= SEGMENT_LENGTHS[0]
 
     # Quarter-circle bend: retain the original 5 cm radius.
