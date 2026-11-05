@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<robot name="crs_6dof_approx">
+<robot name="crs_6dof">
 
   <!--
     Parametric approximation of a 6-axis CRS-style industrial robot.
