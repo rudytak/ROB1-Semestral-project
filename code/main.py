@@ -1,6 +1,6 @@
 from ctu_crs import CRS97
 from camera import load_camera_calibration
-from sequence import calculate, run_sequence
+from sequence import calculate, run_sequence, check_sols    
 
 
 def print_menu(maze_name, home):
@@ -116,6 +116,11 @@ def main():
                     # Observe the maze and estimate table motion.
                     print("\nMeasuring table motion...")
                     model = calculate(robot, calibration)
+
+                    # Reachability check
+                    if not check_sols(robot, maze, model, tilt=tilt):
+                        print("Entrance reachability check failed. Returning to the menu.")
+                        continue
 
                     # Wait before starting the actual traversal.
                     print(
