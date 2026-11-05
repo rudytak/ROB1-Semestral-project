@@ -96,7 +96,7 @@
 
     <collision>
       <origin xyz="0 0 0.0175"/>
-      <geometry><box size="0.125 0.125 0.035" length="0.1802"/></geometry>
+      <geometry><box size="0.125 0.125 0.035"/></geometry>
     </collision>
   </link>
 
