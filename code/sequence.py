@@ -178,6 +178,9 @@ def target_poses(maze, model, s, phi, tilt=False):
     T_maze_H = maze.hoop_pose(s, tilt=tilt)
 
     T_BH = T_Bmaze @ T_maze_H
+
+    T_BH[:3, :3] = np.eye(3)
+
     T_BF = T_BH @ T_HOOP_TO_FLANGE
 
     return T_Bmaze, T_BH, T_BF
