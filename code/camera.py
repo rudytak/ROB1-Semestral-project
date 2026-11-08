@@ -11,7 +11,7 @@ from helper import euler_xyz_to_matrix, matrix_to_euler_xyz
 METADATA_PATH = 'calibration_data/metadata.json'
 CALIBRATION_PATH = 'calibration_data/camera_calib.json'
 
-def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = (0, -np.pi, 0), x_range = (0.4, 0.525), y_range = (-0.17, 0.17), z_range = (0.049, 0.15)):
+def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = (0, -np.pi, 0), x_range = (0.4, 0.525), y_range = (-0.17, 0.17), z_range = (0.049, 0.15), path=METADATA_PATH):
 
     def select_good_rotation(x,y,z):
         center = (
@@ -93,17 +93,17 @@ def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = 
                 })
 
     # save the metadata json
-    with open(METADATA_PATH, 'w') as f:
+    with open(path, 'w') as f:
         json.dump(data_points, f, ensure_ascii=False, indent=4)
 
     return data_points
 
-def load_calibration_data():
-    if not os.path.isfile(METADATA_PATH):
+def load_calibration_data(path = METADATA_PATH):
+    if not os.path.isfile(path):
         raise Exception("Calibration metadata missing! Run take_calibration_pictures() first")
 
     metadata = None
-    with open(METADATA_PATH) as f:
+    with open(path) as f:
         metadata = json.load(f)
 
     images = []
@@ -241,6 +241,7 @@ def estimate_projection_matrix(world_points, image_points):
 
     # Solve A p = 0 using SVD.
     _, singular_values, Vt = np.linalg.svd(A, full_matrices=True)
+    # print(Vt.shape, Vt, singular_values)
     Pn = Vt[-1].reshape(3, 4)
 
     # Undo coordinate normalization:
@@ -319,11 +320,11 @@ def calibrate_camera():
         "reprojection_errors": errors
     }
 
-def save_camera_calibration():
+def save_camera_calibration(path = CALIBRATION_PATH):
     res = calibrate_camera()
 
     # save the metadata json
-    with open(CALIBRATION_PATH, 'w') as f:
+    with open(path, 'w') as f:
         json.dump({
             "P": res['P'].tolist(),
             "K": res['K'].tolist(),
@@ -334,12 +335,12 @@ def save_camera_calibration():
             "reprojection_errors": res['reprojection_errors'].tolist()
         }, f, ensure_ascii=False, indent=4)
 
-def load_camera_calibration():
-    if not os.path.isfile(CALIBRATION_PATH):
+def load_camera_calibration(path = CALIBRATION_PATH):
+    if not os.path.isfile(path):
         raise Exception("Camera calibration data missing! Run take_calibration_pictures() and save_camera_calibration() first")
 
     data = None
-    with open(CALIBRATION_PATH) as f:
+    with open(path) as f:
         data = json.load(f)
 
     return {
