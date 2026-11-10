@@ -56,7 +56,7 @@ def maze_base_pose(p1, p2):
 
 
 
-def calculate(robot, calib_results, duration=OBSERVATION_TIME):
+def calculate(robot, calib_results, duration=OBSERVATION_TIME, view=None):
     """Observe the maze and return fitted table-motion parameters."""
     start_t = time.monotonic()
 
@@ -71,6 +71,8 @@ def calculate(robot, calib_results, duration=OBSERVATION_TIME):
             img, calib_results
         )
         detections = {d["id"]: d for d in results}
+        if view is not None:
+            view.show(frame=(img, frame_time, detections))
 
         if 1 not in detections or 2 not in detections:
             continue
@@ -225,7 +227,7 @@ def check_sols(robot, maze, model, tilt=False):
     return passed
 
 
-def run_sequence(robot, maze, model, tilt=False):
+def run_sequence(robot, maze, model, tilt=False, view=None):
     """Run one outward-and-return traversal."""
     s_max = maze.TOTAL_LENGTH
     s_turn = s_max - END_MARGIN
@@ -240,11 +242,16 @@ def run_sequence(robot, maze, model, tilt=False):
 
 
     while True:
+        frame = view.capture() if view is not None else None
+
         dt = time.monotonic() - model["last_time"]
 
         phi = (model["phi_last"] + model["omega_scalar"] * (dt + PREDICTION_LEAD))
 
         T_B_to_maze_base, T_BH, T_BF_target = target_poses(maze, model, s, phi, tilt=tilt)
+
+        if view is not None:
+            view.show(model, s, prediction=T_BH, frame=frame)
 
         print_pose(T_B_to_maze_base, "maze base")
         print_pose(T_BH, "hoop")

@@ -1,15 +1,15 @@
 from ctu_crs import CRS97
 from camera import load_camera_calibration
-from sequence import calculate, run_sequence, check_sols    
+from sequence import calculate, run_sequence, check_sols   
+from image_view import LiveView 
 
 
-def print_menu(maze_name, home):
+def print_menu(maze_name, home, show_images):
     print("\n" + "-" * 45)
     print(f"Selected maze: {maze_name.upper()}")
-    print(f"Automatic homing before start: "
-          f"{'ON' if home else 'OFF'}")
+    print(f"[b] Toggle automatic homing: {'ON' if home else 'OFF'}")
+    print(f"[i] Toggle Show images: {'ON' if show_images else 'OFF'}")
     print("[s] Select maze and start sequence")
-    print("[b] Toggle automatic homing")
     print("[h] Go home now")
     print("[q] Go home, close robot, and quit")
 
@@ -60,11 +60,17 @@ def main():
     maze_name = "a"
     home = False
     robot = None
-
+    show_images = False
+    view = None
+    
     try:
         while True:
-            print_menu(maze_name, home)
+            print_menu(maze_name, home, show_images)
             key = input("> ").strip().lower()
+
+            if key == "i":
+                show_images = not show_images
+                continue
 
             if key == "b":
                 home = not home
@@ -113,9 +119,11 @@ def main():
                     # False for A/B/C, True for D.
                     tilt = maze_name == "d"
 
+                    view = LiveView(robot, calibration, maze, tilt) if show_images else None
+
                     # Observe the maze and estimate table motion.
                     print("\nMeasuring table motion...")
-                    model = calculate(robot, calibration)
+                    model = calculate(robot, calibration, view=view)
 
                     # Reachability check
                     if not check_sols(robot, maze, model, tilt=tilt):
@@ -142,20 +150,22 @@ def main():
                         print("Sequence cancelled. Returning to the menu.")
                         continue
 
-                    run_sequence(
-                        robot,
-                        maze,
-                        model,
-                        tilt=tilt,
-                    )
+                    run_sequence(robot, maze, model, tilt=tilt, view=view)
 
                     go_home(robot)
+                    if view is not None:
+                        view.save_gif()
+                        view.save_plots()
 
                 else:
-                    print("Unknown command. Use s, b, h, or q.")
+                    print("Unknown command. Use s, b, i, h, or q.")
 
             except Exception as exc:
                 print(f"Action failed: {exc}")
+
+            finally:
+                if view is not None:
+                    view.close()
 
     except (KeyboardInterrupt, EOFError):
         print("\nInterrupted. Closing the robot connection.")
