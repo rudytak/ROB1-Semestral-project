@@ -1,117 +1,205 @@
-from matplotlib import pyplot as plt
-import numpy as np
-import cv2 as cv
-from helper import euler_xyz_to_matrix
-import time
-
+from camera import load_camera_calibration
 from ctu_crs import CRS97
-from camera import take_calibration_pictures, save_camera_calibration, load_camera_calibration, detect_ArUco, estimate_aruco_world_positions
+from image_view import LiveView
+from sequence import calculate, check_sols, run_sequence
+from solvable import run_visualization_pipeline
 
-robot = CRS97()
-robot.initialize(home=True)
-# robot.initialize(home=False)
 
-# # Taking calibration pictures
-# take_calibration_pictures(robot, divisions=(3,5,5))
-# take_calibration_pictures(robot, divisions=(2,2,2))
+def print_menu(maze_name, home, show_images, show_solv):
+    print("\n" + "-" * 45)
+    print(f"Selected maze: {maze_name.upper()}")
+    print(f"[b] Toggle automatic homing: {'ON' if home else 'OFF'}")
+    print(f"[i] Toggle Show images: {'ON' if show_images else 'OFF'}")
+    print(f"[r] Toggle Visualize reachability for selected maze: {'ON' if show_solv else 'OFF'}")
+    print("[s] Select maze and start sequence")
+    print("[h] Go home now")
+    print("[q] Go home, close robot, and quit")
 
-# # Calibrating camera (getting P,K matrices)
-# calib_results = save_camera_calibration()
-# print(calib_results)
 
-# Load camera calibration data:
-calib_results = load_camera_calibration()
-print('P = ', calib_results['P'])
-print('K = ', calib_results['K'])
-print('R_CB = ', calib_results['R_CB'])
-print('t_CB = ', calib_results['t_CB'])
-print("-"*50)
+def select_maze(current_maze=None):
+    while True:
+        print("\nSelect maze: [a] [b] [c] [d]")
+        print(f"[Enter] Keep {current_maze.upper()}")
+        print("[q] Cancel")
 
-# Perform ArUco detection
-start_t = time.time()
-ts,xs,ys,zs = [],[],[],[]
-cx, cy, cz = [], [], []
-while time.time() - start_t < 15:
-    # detect_ArUco(robot.grab_image())
-    img = robot.grab_image()
-    res = estimate_aruco_world_positions(img, calib_results)
-    # res = list(filter(lambda r: r["id"] == 1, res))
+        choice = input("> ").strip().lower()
 
-    # if len(res) > 0:
-    #     vec = (res[0]['T_BM'][:3,3])
+        if choice == "":
+            return current_maze
 
-    #     ts.append(time.time() - start_t)
-    #     xs.append(vec[0])
-    #     ys.append(vec[1])
-    #     zs.append(vec[2])
+        if choice in ("a", "b", "c", "d"):
+            return choice
 
-    #     print(f'Took img {len(ts)} at {ts[-1]}')
+        if choice == "q":
+            return None
 
-    if len(res) == 2:
-        det1 = list(filter(lambda r: r["id"] == 1, res))[0]
-        det2 = list(filter(lambda r: r["id"] == 2, res))[0]
-        
-        vec1 = (det1['T_BM'][:3,3])
-        vec2 = (det2['T_BM'][:3,3])
+        print("Please select a, b, c, d, or q.")
 
-        ts.append(time.time() - start_t)
-        xs.append(vec1[0])
-        ys.append(vec1[1])
-        zs.append(vec1[2])
 
-        cx.append((vec1[0] + vec2[0]) / 2)
-        cy.append((vec1[1] + vec2[1]) / 2)
-        cz.append((vec1[2] + vec2[2]) / 2)
+def connect_robot(home):
+    robot = CRS97()
 
-        print(f'Took img {len(ts)} at {ts[-1]}')
+    try:
+        robot.initialize(home=home)
+    except BaseException:
+        try:
+            robot.close()
+        except Exception:
+            pass
+        raise
 
-cx = np.mean(cx)
-cy = np.mean(cy)
-cz = np.mean(cz)
-center = np.array([cx,cy,cz])
+    return robot
 
-angle = np.atan2(xs - cx, ys - cy)
-omega = np.diff(angle) / np.diff(ts)
 
-omega_scalar = -np.mean(list(filter(lambda o: np.abs(o) < 5, omega)))
-print(f"Avg angular speed {omega_scalar} rad/s")
+def go_home(robot):
+    print("Going home...")
+    robot.move_to_q(robot.q_home)
+    robot.wait_for_motion_stop()
+    print("Robot is home.")
 
-start_t = time.time()
-while True:
-    t = time.time() - start_t
 
-    target_position = center + np.array([0.05 * np.cos(omega_scalar *t), 0.05* np.sin(omega_scalar * t),0.05])
-    target_rotation =  euler_xyz_to_matrix(
-        (0, -np.pi, np.pi/2)
-    )
-    # Create homogeneous SE(3) transformation
-    target_pose = np.eye(4)
-    target_pose[:3, :3] = target_rotation # target rotation matrix
-    target_pose[:3, 3] = target_position # target position
+def main():
+    maze_name = "a"
+    home = False
+    robot = None
+    show_images = False
+    view = None
+    show_solv = False
 
-    # Move to the target position using IK
-    ik_sols = robot.ik(target_pose)
-    # filter solution for reachability
-    ik_sols = list(filter(lambda q: robot.in_limits(q), ik_sols))
-    
-    print(len(ik_sols))
-    if len(ik_sols) > 0:
-        # Select the closest position
-        # q0 = robot.get_q()
-        q0 = robot.q_home
-        closest_solution = min(ik_sols, key=lambda q: np.linalg.norm(q - q0))
+    try:
+        while True:
+            print_menu(maze_name, home, show_images, show_solv)
+            key = input("> ").strip().lower()
 
-        robot.move_to_q(closest_solution)
-        robot.wait_for_motion_stop()
-        # time.sleep(.1)
+            if key == "i":
+                show_images = not show_images
+                continue
 
-robot.close()
+            if key == "b":
+                home = not home
+                continue
 
-# plt.figure()
-# # plt.scatter(ts, cx, c="r", label="X")
-# # plt.scatter(ts, cy, c="g", label="Y")
-# # plt.scatter(ts, cz, c="b", label="Z")
-# plt.scatter(ts, angle, c="orange", label="deg/s")
-# plt.scatter(ts[1:], omega, c="blue", label="rad/s")
-# plt.legend()
-# plt.show()
+            if key == "r":
+                show_solv = not show_solv
+                continue
+
+            if key == "q":
+                try:
+                    if robot is None:
+                        robot = connect_robot(home)
+
+                    go_home(robot)
+
+                except Exception as exc:
+                    print(f"Could not go home: {exc}")
+
+                break
+
+            try:
+                if key == "h":
+                    if robot is None:
+                        robot = connect_robot(home)
+
+                    go_home(robot)
+
+                elif key == "s":
+                    selected = select_maze(maze_name)
+
+                    if selected is None:
+                        continue
+
+                    maze_name = selected
+
+                    maze = __import__(
+                        f"maze.maze_{maze_name}",
+                        fromlist=["hoop_pose"],
+                    )
+
+                    # Load the saved camera calibration.
+                    calibration = load_camera_calibration()
+
+                    if robot is None:
+                        robot = connect_robot(home)
+                    elif home:
+                        go_home(robot)
+
+                    # False for A/B/C, True for D.
+                    tilt = maze_name == "d"
+
+                    view = LiveView(robot, calibration, maze, tilt) if show_images else None
+
+                    # Observe the maze and estimate table motion.
+                    print("\nMeasuring table motion...")
+                    model = calculate(robot, calibration, view=view)
+                    if model is None:
+                        print("\nNo valid meas")
+                        continue
+
+                    # Reachability check
+                    if not check_sols(robot, maze, model, tilt=tilt):
+                        print("Entrance reachability check failed. Returning to the menu.")
+                        if not show_solv:
+                            continue
+
+                    print("\nGenerating reachability map...")
+
+                    solvable = run_visualization_pipeline(
+                        robot=robot,
+                        maze=maze,
+                        model=model,
+                        P_matrix=calibration["P"],
+                        tilt=tilt,
+                        use_cached=False,
+                    )
+
+                    print("VISUALIZATION COMPLETE")
+                    print(f"Result: The maze trajectory is {'SAFE' if solvable else 'UNSAFE'}")
+                    print("'reachability_maze_check.png' generated")
+
+                    if not solvable:
+                        continue
+
+                    # Wait before starting the actual traversal.
+                    print(f"\nPreparation finished for maze {maze_name.upper()}.")
+
+                    while True:
+                        choice = input("Press Enter to start, or q + Enter to cancel: ").strip().lower()
+
+                        if choice in ("", "q"):
+                            break
+
+                        print("Press Enter without typing, or type q.")
+
+                    if choice == "q":
+                        print("Sequence cancelled. Returning to the menu.")
+                        continue
+                    for _ in range(8):
+                        run_sequence(robot, maze, model, tilt=tilt, view=view, maze_name=maze_name)
+
+                    go_home(robot)
+                    if view is not None:
+                        view.save_gif()
+                        view.save_plots()
+
+                else:
+                    print("Unknown command. Use s, b, i, h, or q.")
+
+            except Exception as exc:
+                print(f"Action failed: {exc}")
+
+            finally:
+                if view is not None:
+                    view.close()
+
+    except (KeyboardInterrupt, EOFError):
+        print("\nInterrupted. Closing the robot connection.")
+
+    finally:
+        if robot is not None:
+            robot.close()
+
+        print("Application closed.")
+
+
+if __name__ == "__main__":
+    main()
