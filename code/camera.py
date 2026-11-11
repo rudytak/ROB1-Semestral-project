@@ -426,6 +426,8 @@ def estimate_aruco_world_positions(
 
     # Detect markers.
     corners, ids, rejected = detect_ArUco(img)
+    if ids is None:
+        return None
 
     # Marker-local corners, centered at the marker origin.
     # Ordering matches OpenCV's SOLVEPNP_IPPE_SQUARE convention.
