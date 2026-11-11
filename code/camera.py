@@ -108,7 +108,8 @@ def load_calibration_data(path = METADATA_PATH):
 
     images = []
     for meta in metadata:
-        img = cv.imread(meta["filepath"])
+        path = (os.path.join(os.path.dirname(path), meta["filepath"].split("/")[-1]))
+        img = cv.imread(path)
         images.append(img)
 
     return metadata, images
@@ -116,8 +117,8 @@ def load_calibration_data(path = METADATA_PATH):
 def detect_hoop_positions(images):
     # Detection super-parameters
     max_hue_dist = 40
-    min_circle_area = 5000
-    minimal_roundness_deviation = 1 # 100% (is pretty much ignored becase cv.arcLength seems to be under-reporting)
+    min_circle_area = 200
+    minimal_roundness_deviation = 1 # 100% (is pretty much ignored because cv.arcLength seems to be under-reporting)
 
     # Measured hoop color samples
     circle_color_samples = [
@@ -139,6 +140,10 @@ def detect_hoop_positions(images):
     for img in images:
         hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
         mask = cv.inRange(hsv, lower_color_bound, upper_color_bound)
+
+        kernel = np.ones((3,3), np.uint8)
+        # Fill small gaps and smooth boundaries
+        mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
 
         contours_all, hierarchy = cv.findContours(mask.astype(np.uint8), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
