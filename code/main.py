@@ -2,13 +2,15 @@ from ctu_crs import CRS97
 from camera import load_camera_calibration
 from sequence import calculate, run_sequence, check_sols   
 from image_view import LiveView 
+from solvable import run_visualization_pipeline
 
 
-def print_menu(maze_name, home, show_images):
+def print_menu(maze_name, home, show_images, show_solv):
     print("\n" + "-" * 45)
     print(f"Selected maze: {maze_name.upper()}")
     print(f"[b] Toggle automatic homing: {'ON' if home else 'OFF'}")
     print(f"[i] Toggle Show images: {'ON' if show_images else 'OFF'}")
+    print(f"[r] Toggle Visualize reachability for selected maze: {'ON' if show_solv else 'OFF'}")
     print("[s] Select maze and start sequence")
     print("[h] Go home now")
     print("[q] Go home, close robot, and quit")
@@ -62,10 +64,11 @@ def main():
     robot = None
     show_images = False
     view = None
+    show_solv = False
     
     try:
         while True:
-            print_menu(maze_name, home, show_images)
+            print_menu(maze_name, home, show_images, show_solv)
             key = input("> ").strip().lower()
 
             if key == "i":
@@ -74,6 +77,10 @@ def main():
 
             if key == "b":
                 home = not home
+                continue
+
+            if key == "r":
+                show_solv = not show_solv
                 continue
 
             if key == "q":
@@ -124,10 +131,31 @@ def main():
                     # Observe the maze and estimate table motion.
                     print("\nMeasuring table motion...")
                     model = calculate(robot, calibration, view=view)
+                    if model is None:
+                        print("\nNo valid meas")
+                        continue
 
                     # Reachability check
                     if not check_sols(robot, maze, model, tilt=tilt):
                         print("Entrance reachability check failed. Returning to the menu.")
+                        if not show_solv: continue
+
+                    print("\nGenerating reachability map...")
+
+                    solvable = run_visualization_pipeline(
+                        robot=robot,
+                        maze=maze,
+                        model=model,
+                        P_matrix=calibration["P"],
+                        tilt=tilt,
+                        use_cached=False,
+                    )
+
+                    print("VISUALIZATION COMPLETE")
+                    print(f"Result: The maze trajectory is {'SAFE' if solvable else 'UNSAFE'}")
+                    print("'reachability_maze_check.png' generated")
+
+                    if not solvable:
                         continue
 
                     # Wait before starting the actual traversal.
@@ -135,6 +163,8 @@ def main():
                         f"\nPreparation finished for maze "
                         f"{maze_name.upper()}."
                     )
+
+
 
                     while True:
                         choice = input(
@@ -149,8 +179,8 @@ def main():
                     if choice == "q":
                         print("Sequence cancelled. Returning to the menu.")
                         continue
-
-                    run_sequence(robot, maze, model, tilt=tilt, view=view)
+                    for _ in range(8):
+                        run_sequence(robot, maze, model, tilt=tilt, view=view, maze_name=maze_name)
 
                     go_home(robot)
                     if view is not None:

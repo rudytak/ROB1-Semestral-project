@@ -5,15 +5,15 @@ from camera import estimate_aruco_world_positions
 from helper import euler_xyz_to_matrix, print_pose
 
 
-# PREDICTION_LEAD = 2.4
-PREDICTION_LEAD = 1
+PREDICTION_LEAD = 1.1
+# PREDICTION_LEAD = 1
 
 OBSERVATION_TIME = 15.0
 START_DELAY = 8.0
-PATH_STEP = 0.0003
-# PATH_STEP = 0.04
+# PATH_STEP = 0.0003
+PATH_STEP = 0.03    
 # PATH_STEP = 0.0
-END_MARGIN = 0.03
+END_MARGIN = 0.031
 BASE_X_OFFSET = 0.135
 
 
@@ -67,9 +67,9 @@ def calculate(robot, calib_results, duration=OBSERVATION_TIME, view=None):
         img = robot.grab_image()
         frame_time = time.monotonic()
 
-        results = estimate_aruco_world_positions(
-            img, calib_results
-        )
+        results = estimate_aruco_world_positions(img, calib_results)
+        if results is None:
+            return None
         detections = {d["id"]: d for d in results}
         if view is not None:
             view.show(frame=(img, frame_time, detections))
@@ -227,8 +227,10 @@ def check_sols(robot, maze, model, tilt=False):
     return passed
 
 
-def run_sequence(robot, maze, model, tilt=False, view=None):
+def run_sequence(robot, maze, model, tilt=False, view=None, maze_name=None):
     """Run one outward-and-return traversal."""
+
+
     s_max = maze.TOTAL_LENGTH
     s_turn = s_max - END_MARGIN
 
@@ -237,6 +239,16 @@ def run_sequence(robot, maze, model, tilt=False, view=None):
 
     s = 0.0
     s_step = PATH_STEP
+    started = False
+    z_off = 0
+
+    if maze_name == "c":
+        t_pre = PREDICTION_LEAD + 0.4
+        s_step = s_step - 0.005  
+        z_off = 0.009
+
+    else:
+        t_pre = PREDICTION_LEAD 
 
     move_start = time.monotonic()
 
@@ -246,9 +258,20 @@ def run_sequence(robot, maze, model, tilt=False, view=None):
 
         dt = time.monotonic() - model["last_time"]
 
-        phi = (model["phi_last"] + model["omega_scalar"] * (dt + PREDICTION_LEAD))
+        phi = (model["phi_last"] + model["omega_scalar"] * (dt + t_pre))
+        
+        print("\n Phi: ", maze_name == "c" ,((phi * 180 / np.pi) % 360) ,  ((phi * 180 / np.pi) % 360)  in range(340, 360))
+        if not started and maze_name == "c" and (int((phi * 180 / np.pi) % 360)  in range(340, 360)):
+            started = True
+        elif not started and maze_name == "b" and (int((phi * 180 / np.pi) % 360)  in range(210, 270)):
+            started = True
+        
+        if not started:
+            continue
 
+        strarted = True
         T_B_to_maze_base, T_BH, T_BF_target = target_poses(maze, model, s, phi, tilt=tilt)
+        T_BF_target[2,3] += z_off
 
         if view is not None:
             view.show(model, s, prediction=T_BH, frame=frame)

@@ -126,10 +126,15 @@ def draw_overlay(img, calibration, detections, maze, model=None, s=0.0, tilt=Fal
         phi_model = (model["phi_last"] + model["omega_scalar"] * (timestamp - model["last_time"]))
 
         base, current, _ = target_poses(maze, model, s, phi_model, tilt=tilt,)
+        
+        current[0, 3] -= 0.135
+
 
         # During a sequence, prediction is the actual commanded hoop pose.
-        if prediction is None:
-            _, prediction, _ = target_poses(maze, model, s, phi_model + model["omega_scalar"] * PREDICTION_LEAD, tilt=tilt)
+
+        _, prediction, _ = target_poses(maze, model, s, phi_model + model["omega_scalar"] * PREDICTION_LEAD, tilt=tilt)
+
+        prediction[0, 3] -= 0.135
 
         point("Table center (fit)", model["center"], cyan, (8, 40))
 
@@ -211,10 +216,14 @@ class LiveView:
         img = self.robot.grab_image()
         timestamp = time.monotonic()
 
-        results = estimate_aruco_world_positions(img, self.calibration)
-        detections = {d["id"]: d for d in results}
+        try:
+            results = estimate_aruco_world_positions(img, self.calibration)
+            detections = {d["id"]: d for d in results}
+            return img, timestamp, detections
 
-        return img, timestamp, detections
+        except:
+            return None
+
 
     def show(self, model=None, s=0.0, prediction=None, frame=None):
         if not self.enabled:
@@ -222,6 +231,8 @@ class LiveView:
 
         if frame is None:
             frame = self.capture()
+            if frame is None:
+                return self.enabled 
 
         img, timestamp, detections = frame
 
