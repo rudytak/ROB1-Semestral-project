@@ -227,6 +227,9 @@ class LiveView:
 
         self.plot_times.append(timestamp)
 
+        # if detections is None:
+        #     return self.enabled
+        
         if 1 in detections and 2 in detections:
             base = maze_base_pose(
                 detections[1]["T_BM"][:3, 3],
