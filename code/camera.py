@@ -8,57 +8,58 @@ from helper import euler_xyz_to_matrix, matrix_to_euler_xyz
 # TODO: possibly use extra hoop point outside just centers?
 # TODO: acquire K externally using a checkerboard or chAruUco? if hoop approach isn't good enough
 
-METADATA_PATH = 'calibration_data/metadata.json'
-CALIBRATION_PATH = 'calibration_data/camera_calib.json'
+METADATA_PATH = "calibration_data/metadata.json"
+CALIBRATION_PATH = "calibration_data/camera_calib.json"
 
-def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = (0, -np.pi, 0), x_range = (0.4, 0.525), y_range = (-0.17, 0.17), z_range = (0.049, 0.15), path=METADATA_PATH):
 
-    def select_good_rotation(x,y,z):
+def take_calibration_pictures(
+    robot,
+    divisions=(3, 3, 5),
+    target_rotation_RPY=(0, -np.pi, 0),
+    x_range=(0.4, 0.525),
+    y_range=(-0.17, 0.17),
+    z_range=(0.049, 0.15),
+    path=METADATA_PATH,
+):
+
+    def select_good_rotation(x, y, z):
         center = (
-            (x_range[-1] - x_range[0])/2 + x_range[0],
-            (y_range[-1] - y_range[0])/2 + y_range[0],
-            (z_range[-1] - z_range[0])/2 + z_range[0],
+            (x_range[-1] - x_range[0]) / 2 + x_range[0],
+            (y_range[-1] - y_range[0]) / 2 + y_range[0],
+            (z_range[-1] - z_range[0]) / 2 + z_range[0],
         )
 
-        if target_rotation_RPY == 'auto':
+        if target_rotation_RPY == "auto":
             if x >= center[0]:
-                return euler_xyz_to_matrix(
-                    (0, -np.pi, 0)
-                )
+                return euler_xyz_to_matrix((0, -np.pi, 0))
             elif y < center[1]:
-                return euler_xyz_to_matrix(
-                    (0, -np.pi, -np.pi/2)
-                )
+                return euler_xyz_to_matrix((0, -np.pi, -np.pi / 2))
             elif y >= center[1]:
-                return euler_xyz_to_matrix(
-                    (0, -np.pi, np.pi/2)
-                )
+                return euler_xyz_to_matrix((0, -np.pi, np.pi / 2))
             else:
-                return euler_xyz_to_matrix(
-                    (0, -np.pi, 0)
-                )
+                return euler_xyz_to_matrix((0, -np.pi, 0))
         else:
-            return euler_xyz_to_matrix(
-                target_rotation_RPY
-            )
+            return euler_xyz_to_matrix(target_rotation_RPY)
 
     data_points = []
-    hoop_arm_length = .135
+    hoop_arm_length = 0.135
 
     i = 0
     for x in np.linspace(x_range[0], x_range[-1], divisions[0]):
         for y in np.linspace(y_range[0], y_range[-1], divisions[1]):
             for z in np.linspace(z_range[0], z_range[-1], divisions[2]):
-                i+=1
+                i += 1
 
                 # for orientation in viable_orientations:
-                target_rotation = select_good_rotation(x,y,z)
-                target_position = np.array([x,y,z]) - target_rotation @ np.array([-hoop_arm_length, 0, 0])
+                target_rotation = select_good_rotation(x, y, z)
+                target_position = np.array([x, y, z]) - target_rotation @ np.array(
+                    [-hoop_arm_length, 0, 0]
+                )
 
                 # Create homogeneous SE(3) transformation
                 target_pose = np.eye(4)
-                target_pose[:3, :3] = target_rotation # target rotation matrix
-                target_pose[:3, 3] = target_position # target position
+                target_pose[:3, :3] = target_rotation  # target rotation matrix
+                target_pose[:3, 3] = target_position  # target position
 
                 # Move to the target position using IK
                 ik_sols = robot.ik(target_pose)
@@ -69,7 +70,9 @@ def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = 
                     # Select the closest position
                     # q0 = robot.get_q()
                     q0 = robot.q_home
-                    closest_solution = min(ik_sols, key=lambda q: np.linalg.norm(q - q0))
+                    closest_solution = min(
+                        ik_sols, key=lambda q: np.linalg.norm(q - q0)
+                    )
 
                     robot.move_to_q(closest_solution)
                     robot.wait_for_motion_stop()
@@ -86,21 +89,26 @@ def take_calibration_pictures(robot, divisions = (3,3,5), target_rotation_RPY = 
                 cv.imwrite(filepath, img)
                 # Save metadata
                 final_pose = robot.fk(robot.get_q())
-                data_points.append({
-                    "filepath": filepath,
-                    "RPY": matrix_to_euler_xyz(final_pose[:3, :3]).tolist(),
-                    "translation_vector": final_pose[:3, 3].tolist()
-                })
+                data_points.append(
+                    {
+                        "filepath": filepath,
+                        "RPY": matrix_to_euler_xyz(final_pose[:3, :3]).tolist(),
+                        "translation_vector": final_pose[:3, 3].tolist(),
+                    }
+                )
 
     # save the metadata json
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         json.dump(data_points, f, ensure_ascii=False, indent=4)
 
     return data_points
 
-def load_calibration_data(path = METADATA_PATH):
+
+def load_calibration_data(path=METADATA_PATH):
     if not os.path.isfile(path):
-        raise Exception("Calibration metadata missing! Run take_calibration_pictures() first")
+        raise Exception(
+            "Calibration metadata missing! Run take_calibration_pictures() first"
+        )
 
     metadata = None
     with open(path) as f:
@@ -108,17 +116,18 @@ def load_calibration_data(path = METADATA_PATH):
 
     images = []
     for meta in metadata:
-        path = (os.path.join(os.path.dirname(path), meta["filepath"].split("/")[-1]))
+        path = os.path.join(os.path.dirname(path), meta["filepath"].split("/")[-1])
         img = cv.imread(path)
         images.append(img)
 
     return metadata, images
 
+
 def detect_hoop_positions(images):
     # Detection super-parameters
     max_hue_dist = 40
     min_circle_area = 200
-    minimal_roundness_deviation = 1 # 100% (is pretty much ignored because cv.arcLength seems to be under-reporting)
+    max_roundness_deviation = 0.5  # 50% (is pretty much ignored because cv.arcLength seems to be over-reporting)
 
     # Measured hoop color samples
     circle_color_samples = [
@@ -127,10 +136,14 @@ def detect_hoop_positions(images):
         (53, 82, 112),
         (82, 104, 135),
         (88, 105, 117),
-        (83, 111, 137)
+        (83, 111, 137),
     ]
     target_color_rgb = np.mean(circle_color_samples, axis=0).astype(np.uint8)
-    target_color_hsv = cv.cvtColor(target_color_rgb.reshape(1, 1, 3), cv.COLOR_RGB2HSV).reshape(3,)
+    target_color_hsv = cv.cvtColor(
+        target_color_rgb.reshape(1, 1, 3), cv.COLOR_RGB2HSV
+    ).reshape(
+        3,
+    )
 
     # print(f"Target color in HSV: {target_color}, max hue distance: {max_hue_dist}")
     lower_color_bound = np.array([target_color_hsv[0] - max_hue_dist, 50, 50])
@@ -141,19 +154,31 @@ def detect_hoop_positions(images):
         hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
         mask = cv.inRange(hsv, lower_color_bound, upper_color_bound)
 
-        kernel = np.ones((3,3), np.uint8)
+        kernel = np.ones((3, 3), np.uint8)
         # Fill small gaps and smooth boundaries
         mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
 
-        contours_all, hierarchy = cv.findContours(mask.astype(np.uint8), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        contours_all, hierarchy = cv.findContours(
+            mask.astype(np.uint8), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
+        )
 
         contours = [c for c in contours_all if cv.contourArea(c) > min_circle_area]
-        print(f"Found {len(contours_all)} contours in the image of which {len(contours)} are larger than {min_circle_area} pixels")
+        print(
+            f"Found {len(contours_all)} contours in the image of which {len(contours)} are larger than {min_circle_area} pixels"
+        )
 
         # find the most circular contour
-        f = lambda c: abs(4*np.pi*cv.contourArea(c) / (cv.arcLength(c, True)**2 + 1e-8) - 1)
-        passing_contours = list(filter(lambda c: f(c) < minimal_roundness_deviation, contours))
-        print(list(map(f, contours)), list(map(cv.contourArea, contours)), list(map(lambda c: cv.arcLength(c,True), contours)))
+        f = lambda c: abs(
+            4 * np.pi * cv.contourArea(c) / (cv.arcLength(c, True) ** 2 + 1e-8) - 1
+        )
+        passing_contours = list(
+            filter(lambda c: f(c) < max_roundness_deviation, contours)
+        )
+        print(
+            list(map(f, contours)),
+            list(map(cv.contourArea, contours)),
+            list(map(lambda c: cv.arcLength(c, True), contours)),
+        )
         if len(passing_contours) == 0:
             raise Exception("No sufficiently good circle has been found in the image!")
 
@@ -173,10 +198,6 @@ def detect_hoop_positions(images):
     return centers
 
 
-
-
-
-
 def normalize_2d_points(points):
     """Normalize Nx2 image points to centroid 0, mean distance sqrt(2)."""
     centroid = points.mean(axis=0)
@@ -187,16 +208,15 @@ def normalize_2d_points(points):
         raise ValueError("Degenerate image points")
 
     scale = np.sqrt(2.0) / mean_dist
-    T = np.array([
-        [scale, 0, -scale * centroid[0]],
-        [0, scale, -scale * centroid[1]],
-        [0, 0, 1]
-    ])
+    T = np.array(
+        [[scale, 0, -scale * centroid[0]], [0, scale, -scale * centroid[1]], [0, 0, 1]]
+    )
 
     points_h = np.column_stack([points, np.ones(len(points))])
     normalized = (T @ points_h.T).T
 
     return normalized[:, :2], T
+
 
 def normalize_3d_points(points):
     """Normalize Nx3 world points to centroid 0, mean distance sqrt(3)."""
@@ -216,6 +236,7 @@ def normalize_3d_points(points):
     normalized = (T @ points_h.T).T
 
     return normalized[:, :3], T
+
 
 def estimate_projection_matrix(world_points, image_points):
     """
@@ -237,10 +258,8 @@ def estimate_projection_matrix(world_points, image_points):
     A = []
 
     for (X, Y, Z, W), (u, v) in zip(Xh, xn):
-        A.append([X, Y, Z, W, 0, 0, 0, 0,
-                  -u*X, -u*Y, -u*Z, -u*W])
-        A.append([0, 0, 0, 0, X, Y, Z, W,
-                  -v*X, -v*Y, -v*Z, -v*W])
+        A.append([X, Y, Z, W, 0, 0, 0, 0, -u * X, -u * Y, -u * Z, -u * W])
+        A.append([0, 0, 0, 0, X, Y, Z, W, -v * X, -v * Y, -v * Z, -v * W])
 
     A = np.asarray(A)
 
@@ -258,14 +277,14 @@ def estimate_projection_matrix(world_points, image_points):
 
     return P, singular_values
 
+
 def calibrate_camera():
     # USES DLT
     metadata, images = load_calibration_data()
 
     # Robot-base coordinates of the observed hoop center
     world_points = np.asarray(
-        [m["translation_vector"] for m in metadata],
-        dtype=np.float64
+        [m["translation_vector"] for m in metadata], dtype=np.float64
     )
 
     # Detected hoop centers, one (u, v) pair per image
@@ -280,9 +299,7 @@ def calibrate_camera():
         )
 
     # Estimate projection matrix
-    P, singular_values = estimate_projection_matrix(
-        world_points, image_points
-    )
+    P, singular_values = estimate_projection_matrix(world_points, image_points)
 
     # Decompose P = K [R | t]
     K, R_CB, camera_center_h, *_ = cv.decomposeProjectionMatrix(P)
@@ -291,17 +308,13 @@ def calibrate_camera():
     K = K / K[2, 2]
 
     # OpenCV gives the camera center as a homogeneous point
-    camera_center_base = (
-        camera_center_h[:3, 0] / camera_center_h[3, 0]
-    )
+    camera_center_base = camera_center_h[:3, 0] / camera_center_h[3, 0]
 
     # Camera center C = -R.T @ t, so t = -R @ C
     t_CB = -R_CB @ camera_center_base
 
     # Reprojection error using the estimated P
-    world_h = np.column_stack([
-        world_points, np.ones(len(world_points))
-    ])
+    world_h = np.column_stack([world_points, np.ones(len(world_points))])
     projected_h = (P @ world_h.T).T
     projected = projected_h[:, :2] / projected_h[:, 2:3]
 
@@ -322,43 +335,50 @@ def calibrate_camera():
         "t_CB": t_CB,
         "camera_position_base": camera_center_base,
         "rms_error": rms_error,
-        "reprojection_errors": errors
+        "reprojection_errors": errors,
     }
 
-def save_camera_calibration(path = CALIBRATION_PATH):
+
+def save_camera_calibration(path=CALIBRATION_PATH):
     res = calibrate_camera()
 
     # save the metadata json
-    with open(path, 'w') as f:
-        json.dump({
-            "P": res['P'].tolist(),
-            "K": res['K'].tolist(),
-            "R_CB": res['R_CB'].tolist(),
-            "t_CB": res['t_CB'].tolist(),
-            "camera_position_base": res['camera_position_base'].tolist(),
-            "rms_error": res['rms_error'].tolist(),
-            "reprojection_errors": res['reprojection_errors'].tolist()
-        }, f, ensure_ascii=False, indent=4)
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "P": res["P"].tolist(),
+                "K": res["K"].tolist(),
+                "R_CB": res["R_CB"].tolist(),
+                "t_CB": res["t_CB"].tolist(),
+                "camera_position_base": res["camera_position_base"].tolist(),
+                "rms_error": res["rms_error"].tolist(),
+                "reprojection_errors": res["reprojection_errors"].tolist(),
+            },
+            f,
+            ensure_ascii=False,
+            indent=4,
+        )
 
-def load_camera_calibration(path = CALIBRATION_PATH):
+
+def load_camera_calibration(path=CALIBRATION_PATH):
     if not os.path.isfile(path):
-        raise Exception("Camera calibration data missing! Run take_calibration_pictures() and save_camera_calibration() first")
+        raise Exception(
+            "Camera calibration data missing! Run take_calibration_pictures() and save_camera_calibration() first"
+        )
 
     data = None
     with open(path) as f:
         data = json.load(f)
 
     return {
-        "P": np.array(data['P']),
-        "K": np.array(data['K']),
-        "R_CB": np.array(data['R_CB']),
-        "t_CB": np.array(data['t_CB']),
-        "camera_position_base": np.array(data['camera_position_base']),
-        "rms_error": np.array(data['rms_error']),
-        "reprojection_errors": np.array(data['reprojection_errors'])
+        "P": np.array(data["P"]),
+        "K": np.array(data["K"]),
+        "R_CB": np.array(data["R_CB"]),
+        "t_CB": np.array(data["t_CB"]),
+        "camera_position_base": np.array(data["camera_position_base"]),
+        "rms_error": np.array(data["rms_error"]),
+        "reprojection_errors": np.array(data["reprojection_errors"]),
     }
-
-
 
 
 def detect_ArUco(img):
@@ -369,7 +389,7 @@ def detect_ArUco(img):
     detector = cv.aruco.ArucoDetector(aruco_dict)
 
     corners, ids, rej = detector.detectMarkers(gray)
-    
+
     # imgc = img.copy()
     # cv.aruco.drawDetectedMarkers(imgc,corners,ids)
     # plt.figure(figsize=(10,5))
@@ -418,9 +438,7 @@ def estimate_aruco_world_positions(
     if dist_coeffs is None:
         dist_coeffs = np.zeros((5, 1), dtype=np.float64)
     else:
-        dist_coeffs = np.asarray(
-            dist_coeffs, dtype=np.float64
-        ).reshape(-1, 1)
+        dist_coeffs = np.asarray(dist_coeffs, dtype=np.float64).reshape(-1, 1)
 
     # Transformation from camera coordinates to robot-base coordinates.
     R_BC = R_CB.T
@@ -436,19 +454,20 @@ def estimate_aruco_world_positions(
     # Marker-local corners, centered at the marker origin.
     # Ordering matches OpenCV's SOLVEPNP_IPPE_SQUARE convention.
     half = marker_size / 2.0
-    object_points = np.array([
-        [-half,  half, 0.0],
-        [ half,  half, 0.0],
-        [ half, -half, 0.0],
-        [-half, -half, 0.0],
-    ], dtype=np.float64)
+    object_points = np.array(
+        [
+            [-half, half, 0.0],
+            [half, half, 0.0],
+            [half, -half, 0.0],
+            [-half, -half, 0.0],
+        ],
+        dtype=np.float64,
+    )
 
     results = []
 
     for marker_corners, marker_id in zip(corners, ids.flatten()):
-        image_points = marker_corners.reshape(4, 2).astype(
-            np.float64
-        )
+        image_points = marker_corners.reshape(4, 2).astype(np.float64)
 
         success, rvec, tvec = cv.solvePnP(
             object_points,
@@ -477,25 +496,23 @@ def estimate_aruco_world_positions(
         center_camera = t_CM
 
         # Reproject the corners to check the pose fit.
-        projected, _ = cv.projectPoints(
-            object_points, rvec, tvec, K, dist_coeffs
-        )
+        projected, _ = cv.projectPoints(object_points, rvec, tvec, K, dist_coeffs)
         projected = projected.reshape(4, 2)
         reprojection_error = np.sqrt(
-            np.mean(np.sum(
-                (projected - image_points) ** 2, axis=1
-            ))
+            np.mean(np.sum((projected - image_points) ** 2, axis=1))
         )
 
-        results.append({
-            "id": int(marker_id),
-            "center_base": center_base,
-            "center_camera": center_camera,
-            "depth": float(center_camera[2]),
-            "range": float(np.linalg.norm(center_camera)),
-            "R_BM": T_BM[:3, :3],
-            "T_BM": T_BM,
-            "reprojection_error_px": float(reprojection_error),
-        })
+        results.append(
+            {
+                "id": int(marker_id),
+                "center_base": center_base,
+                "center_camera": center_camera,
+                "depth": float(center_camera[2]),
+                "range": float(np.linalg.norm(center_camera)),
+                "R_BM": T_BM[:3, :3],
+                "T_BM": T_BM,
+                "reprojection_error_px": float(reprojection_error),
+            }
+        )
 
     return results
